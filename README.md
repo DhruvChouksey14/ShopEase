@@ -296,12 +296,6 @@ docker compose up -d
 docker compose ps
 ```
 
-Local dev tooling is reachable once the stack is up — see [LOCAL_SETUP.md](./LOCAL_SETUP.md#1-start-infrastructure)
-for the full list of ports and default credentials for these containers. They are throwaway,
-localhost-only dev credentials defined in `docker-compose.yml` itself, not application secrets —
-change them (or bind ports to `127.0.0.1` only) before running this compose file anywhere
-reachable from outside your machine.
-
 ### 2. Configure environment
 ```bash
 for service in api-gateway user-service search-service catalog-service \
@@ -310,7 +304,6 @@ for service in api-gateway user-service search-service catalog-service \
   cp "server/$service/.env.example" "server/$service/.env"
 done
 ```
-Fill in Google / SendGrid / Razorpay credentials per [LOCAL_SETUP.md](./LOCAL_SETUP.md).
 
 ### 3. Run migrations
 ```bash
