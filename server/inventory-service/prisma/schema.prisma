@@ -1,0 +1,61 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Stock {
+  id         String   @id @default(uuid())
+  productId  String   @unique
+  sku        String
+  available  Int      @default(0)
+  reserved   Int      @default(0)
+  version    Int      @default(0)
+  lowStockThreshold Int @default(5)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  reservations StockReservation[]
+
+  @@index([productId])
+  @@map("stocks")
+}
+
+enum ReservationStatus {
+  HELD
+  CONFIRMED
+  RELEASED
+  EXPIRED
+}
+
+// One row per (orderId, productId) reservation — lets us release/confirm the
+// exact quantity that was held for a specific order, and lets an expiry sweep
+// job find and reap abandoned holds (order never completed checkout).
+model StockReservation {
+  id            String            @id @default(uuid())
+  orderId       String
+  productId     String
+  quantity      Int
+  status        ReservationStatus @default(HELD)
+  expiresAt     DateTime
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  stock Stock @relation(fields: [productId], references: [productId])
+
+  @@unique([orderId, productId])
+  @@index([status, expiresAt])
+  @@index([orderId])
+  @@map("stock_reservations")
+}
+
+model IdempotencyRecord {
+  id          String   @id @default(uuid())
+  eventKey    String   @unique
+  processedAt DateTime @default(now())
+
+  @@index([eventKey])
+  @@map("idempotency_records")
+}

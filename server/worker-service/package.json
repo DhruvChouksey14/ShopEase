@@ -1,0 +1,18 @@
+{
+  "name": "worker-service",
+  "version": "1.0.0",
+  "description": "Background job worker — RabbitMQ consumers with dead-letter retry (invoice PDF generation, etc.)",
+  "main": "src/index.js",
+  "scripts": { "start": "node src/index.js", "dev": "nodemon src/index.js" },
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "amqplib": "^0.10.4",
+    "axios": "^1.13.4",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "pdfkit": "^0.15.1",
+    "prom-client": "^15.1.3"
+  },
+  "devDependencies": { "nodemon": "^3.1.14" }
+}

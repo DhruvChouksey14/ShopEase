@@ -1,0 +1,87 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum OrderStatus {
+  PENDING
+  STOCK_RESERVED
+  PAYMENT_PENDING
+  CONFIRMING
+  CONFIRMED
+  CANCELLING
+  CANCELLED
+  FAILED
+  EXPIRED
+  SHIPPED
+  DELIVERED
+}
+
+model Order {
+  id              String      @id @default(uuid())
+  userId          String
+  status          OrderStatus @default(PENDING)
+  totalAmount     Float
+  currency        String      @default("INR")
+  paymentOrderId  String?     @unique
+  idempotencyKey  String      @unique
+  lockExpiresAt   DateTime?
+  failureReason   String?
+  shippingAddress Json
+  version         Int         @default(0)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  items    OrderItem[]
+  sagaLogs SagaLog[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([paymentOrderId])
+  @@map("orders")
+}
+
+model OrderItem {
+  id        String @id @default(uuid())
+  orderId   String
+  productId String
+  sku       String
+  name      String
+  price     Float
+  quantity  Int
+  imageUrl  String?
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+model SagaLog {
+  id        String   @id @default(uuid())
+  orderId   String
+  step      String
+  status    String   // PENDING | COMPLETED | FAILED | COMPENSATED
+  request   Json?
+  response  Json?
+  error     String?
+  createdAt DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@index([orderId])
+  @@map("saga_logs")
+}
+
+model IdempotencyRecord {
+  id          String   @id @default(uuid())
+  eventKey    String   @unique
+  response    Json?
+  processedAt DateTime @default(now())
+
+  @@index([eventKey])
+  @@map("idempotency_records")
+}
