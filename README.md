@@ -292,9 +292,12 @@ every saga step and every webhook/verification attempt is recorded before and af
 
 ### 1. Start infrastructure
 ```bash
+cp docker-compose.env.template .env
 docker compose up -d
 docker compose ps
 ```
+
+The example credentials are for local development only. Compose reads passwords from the root `.env` file.
 
 ### 2. Configure environment
 ```bash
@@ -311,6 +314,18 @@ for service in user-service catalog-service inventory-service order-service paym
   (cd "server/$service" && npx prisma migrate deploy)
 done
 ```
+
+Build a service image from the repository root so its Dockerfile can copy `shared/`:
+
+```bash
+docker build -f server/order-service/Dockerfile -t shopease/order-service .
+```
+
+Catalog, order, and payment migrations backfill integer paise columns, verify each backfill against the old values, then drop the Float columns. Set `RECAPTCHA_SECRET` in the user-service environment and `VITE_RECAPTCHA_SITE_KEY` in the frontend build environment to enable CAPTCHA after repeated login failures.
+
+Kafka consumers retry through `<source-topic>.retry` topics with the attempt count in message headers. Production Kafka clusters should provision each retry topic with the source topic's partition count and retention policy before deploying the consumers.
+
+The order-service migration also creates the `order_outbox` table. Confirmation events are committed with the order status and delivered asynchronously. Delivery is at-least-once: the AI recommendation consumer deduplicates by order ID, while notification email delivery may repeat if the publisher crashes after Kafka accepts an event but before the outbox marks it delivered. Gateway circuit-breaker state is shared through Redis when Redis is available; on Redis failure it falls back to process-local state and emits an alert. If publishing a DLQ record fails after retries, the consumer leaves the source offset unresolved and logs an `ALERT` for monitoring.
 
 ### 4. Start services
 ```bash
@@ -382,3 +397,63 @@ data source and build dashboards from `http_request_duration_seconds` / `http_re
   never confirmed (abandoned checkouts), independent of the saga's own compensation path.
 
 ---
+
+## AI shopping assistant
+
+The AI service provides product search chat and recommendations using the existing search, catalog, inventory, and cart APIs. Chat is available to signed-in customers at `POST /api/ai/chat` with `{ "message": "..." }`. Product recommendations are public through `GET /api/ai/recommendations/product/:productId?type=similar|together` and popular items through `GET /api/ai/recommendations/popular`.
+
+The service uses Groq's OpenAI-compatible endpoint and defaults to `openai/gpt-oss-20b`. Set `GROQ_API_KEY` from a Groq Free tier account and keep that account on the Free tier; upgrading to Groq's paid Developer tier requires a payment method. When free-tier limits are reached, chat responds as unavailable. This repository does not configure a paid provider or billing. You can select another Groq model with `LLM_MODEL`. Follow `server/ai-service/.env.example` for local configuration. Redis stores per-user conversation context for 30 minutes, with up to 20 messages. The `ai-service` Docker image uses the repository root as its build context so it can include `shared/`.
+
+Confirmed order events feed Redis popularity and co-purchase rankings. Similar products use the existing Elasticsearch search service. Add-to-cart requests validate the product and stock server-side; checkout navigation only occurs from the frontend after the user requests it and the cart is non-empty.
+
+Start the AI container with `docker compose up --build ai-service`. For local testing, install dependencies in `server/ai-service` and run `npm test`.
+
+## Machine-learning recommendations
+
+The optional `recommendation-service` (FastAPI, port `4010`) provides personalized recommendations, similar products, bought-together results, cart suggestions, and trending results. The Node `ai-service` remains the compatibility facade: it calls the ML service briefly, then falls back to its existing Redis co-occurrence, popularity, and search logic when the ML service is unavailable or empty. Every ML product ID is hydrated through catalog and inventory and normalized before reaching the frontend, so inactive or out-of-stock products are excluded.
+
+### Data and license
+
+Training uses the [Retailrocket e-commerce dataset](https://www.kaggle.com/datasets/retailrocket/ecommerce-dataset), supplied manually. Do not download it from the application. Place `events.csv`, `item_properties_part1.csv`, `item_properties_part2.csv`, and `category_tree.csv` in `data/raw/retailrocket/`. The importer writes `events.parquet`, `interactions.parquet`, and `items.parquet` to `data/processed/`. Retailrocket has no names, prices, or images; catalog loading generates deterministic synthetic placeholders and prints a warning. Use the dataset only under its upstream non-commercial/personal-use terms.
+
+### ML run order
+
+```bash
+cd server/recommendation-service
+uv venv --python python3.13 .venv
+uv pip install --python .venv/bin/python -r requirements.txt
+cd ../..
+python3 scripts/import_dataset.py --input-dir data/raw/retailrocket
+python3 scripts/load_catalog.py --admin-user-id <ADMIN_USER_ID>
+cd server/recommendation-service
+.venv/bin/python -m app.ml.train --data-dir ../../data/processed --model-dir ./models
+.venv/bin/python -m app.ml.evaluate --interactions ../../data/processed/interactions.parquet
+docker compose up --build recommendation-service ai-service api-gateway
+```
+
+Use `--min-interactions`, `--max-items`, `--max-events`, and `--max-events-per-visitor` to control filtering. `scripts/make_demo_user.py --shop-user-id <SHOP_USER_ID>` maps a real demo account to an active visitor with 20-100 events across categories. Do not generate synthetic users. Set `DATA_SOURCE=dataset`, `live`, or `hybrid`; hybrid training gives live events the higher recency weight. Set `RECOMMENDATION_SERVICE_URL` to an unavailable endpoint or omit the recommendation container to switch ML off; the Node fallback remains active.
+
+The gateway accepts `POST /api/ai/events` with at most 20 strict events. Event identity comes from the trusted `x-user-id` gateway header; anonymous sessions use `sessionId`. The recommendation service stores these events in its own `recommendation_interactions` table and also consumes `order.confirmed`. Internal service endpoints require `INTERNAL_SERVICE_KEY`; clients never supply a user ID in a request body to personalize results.
+
+### Recommendation results
+
+The current Retailrocket offline evaluation uses a chronological split: the first 80% of timestamps trains the models, the next time window tunes hybrid weights, and the final held-out window is used for reported metrics and promotion decisions. Hybrid weights are selected only on validation data.
+
+| Model | Precision@10 | Recall@10 | NDCG@10 | MAP@10 | Coverage |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Time-decayed popularity | 0.0007 | 0.0068 | 0.0043 | 0.0034 | 0.0022 |
+| All-time popularity | 0.0068 | 0.0588 | 0.0371 | 0.0288 | 0.0026 |
+| Item-item cosine | 0.0209 | 0.1686 | 0.1231 | 0.1068 | 0.1456 |
+| ALS | 0.0081 | 0.0715 | 0.0471 | 0.0378 | 0.0426 |
+| Content | 0.0223 | 0.1855 | 0.1052 | 0.0764 | 0.2172 |
+| Hybrid | 0.0230 | 0.1745 | 0.1250 | 0.1053 | 0.1874 |
+
+```mermaid
+flowchart LR
+  E[User events] --> K[Kafka]
+  K --> T[Training and evaluation]
+  T --> A[Versioned model artifact]
+  A --> S[Recommendation serving]
+  S --> N[Node AI service]
+  N --> F[Redis/search fallback]
+```
