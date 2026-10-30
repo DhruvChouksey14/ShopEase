@@ -6,8 +6,8 @@ services:
     container_name: postgres
     restart: always
     environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: shopeasepass
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: postgres
     ports:
       - "5432:5432"
@@ -20,8 +20,8 @@ services:
     image: dpage/pgadmin4
     container_name: pgadmin
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@admin.com
-      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@example.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:?Set PGADMIN_DEFAULT_PASSWORD in .env}
     ports:
       - "8081:80"
     depends_on:
@@ -34,7 +34,7 @@ services:
     container_name: redis
     restart: always
     environment:
-      REDIS_ARGS: "--requirepass shopeasepass"
+      REDIS_ARGS: "--requirepass ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}"
     ports:
       - "6379:6379"
       - "8001:8001"
@@ -83,7 +83,7 @@ services:
       - shopease-network
 
   kafka-ui:
-    image: provectuslabs/kafka-ui:latest
+    image: provectuslabs/kafka-ui:v0.7.2
     container_name: kafka-ui
     restart: always
     depends_on:
@@ -103,13 +103,71 @@ services:
     container_name: rabbitmq
     restart: always
     environment:
-      RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-shopease}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?Set RABBITMQ_DEFAULT_PASS in .env}
     ports:
       - "5672:5672"   # AMQP
-      - "15672:15672" # Management UI — http://localhost:15672 (guest/guest)
+      - "15672:15672" # Management UI — credentials come from root .env
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - shopease-network
+
+  ai-service:
+    build:
+      context: .
+      dockerfile: server/ai-service/Dockerfile
+    container_name: ai-service
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      PORT: 4009
+      INTERNAL_SERVICE_KEY: ${INTERNAL_SERVICE_KEY:?Set INTERNAL_SERVICE_KEY in .env}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}@redis:6379
+      KAFKA_BROKER: kafka:9092
+      SEARCH_SERVICE_URL: ${AI_SEARCH_SERVICE_URL:-http://host.docker.internal:4002}
+      CATALOG_SERVICE_URL: ${AI_CATALOG_SERVICE_URL:-http://host.docker.internal:4003}
+      INVENTORY_SERVICE_URL: ${AI_INVENTORY_SERVICE_URL:-http://host.docker.internal:4007}
+      CART_SERVICE_URL: ${AI_CART_SERVICE_URL:-http://host.docker.internal:4008}
+      RECOMMENDATION_SERVICE_URL: http://recommendation-service:4010
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-20b}
+    ports:
+      - "4009:4009"
+    depends_on:
+      - redis
+      - kafka
+    networks:
+      - shopease-network
+
+  recommendation-service:
+    build:
+      context: .
+      dockerfile: server/recommendation-service/Dockerfile
+    container_name: recommendation-service
+    restart: unless-stopped
+    environment:
+      PORT: 4010
+      INTERNAL_SERVICE_KEY: ${INTERNAL_SERVICE_KEY:?Set INTERNAL_SERVICE_KEY in .env}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}@redis:6379
+      KAFKA_BROKER: kafka:9092
+      DATA_SOURCE: ${RECOMMENDATION_DATA_SOURCE:-dataset}
+      MODEL_DIR: /models
+      DATABASE_URL: ${RECOMMENDATION_DATABASE_URL:-postgresql://admin:${POSTGRES_PASSWORD}@postgres:5432/postgres}
+      ENABLE_CONSUMER: "true"
+      ENABLE_RETRAINING: ${RECOMMENDATION_ENABLE_RETRAINING:-false}
+      DATA_DIR: /data
+      RETRAIN_AFTER_INTERACTIONS: ${RECOMMENDATION_RETRAIN_AFTER_INTERACTIONS:-1000}
+    ports:
+      - "4010:4010"
+    depends_on:
+      - redis
+      - kafka
+      - postgres
+    volumes:
+      - recommendation_models:/models
+      - ./data:/data:ro
     networks:
       - shopease-network
 
@@ -143,7 +201,7 @@ services:
 
   # ─── Observability ────────────────────────────────────────────────────────
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.55.1
     container_name: prometheus
     restart: always
     extra_hosts:
@@ -157,18 +215,18 @@ services:
       - shopease-network
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.4.0
     container_name: grafana
     restart: always
     depends_on:
       - prometheus
     environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}
     volumes:
       - grafana_data:/var/lib/grafana
     ports:
-      - "3001:3000" # http://localhost:3001 (admin/admin) — add Prometheus (http://prometheus:9090) as a data source
+      - "3001:3000" # http://localhost:3001 — add Prometheus (http://prometheus:9090) as a data source
     networks:
       - shopease-network
 
@@ -182,6 +240,7 @@ volumes:
   rabbitmq_data:
   prometheus_data:
   grafana_data:
+  recommendation_models:
 
 networks:
   shopease-network:
