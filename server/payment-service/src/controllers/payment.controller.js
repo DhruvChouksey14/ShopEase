@@ -2,13 +2,13 @@ const { BadRequestError } = require('../utils/error');
 const paymentService = require('../services/payment.service');
 
 exports.createPaymentOrder = async (req, res) => {
-     const { orderId, amount, userId, idempotencyKey } = req.body;
+     const { orderId, amountPaise, userId, idempotencyKey } = req.body;
 
-     if (!orderId || !amount || !userId || !idempotencyKey) {
-          throw new BadRequestError('orderId, amount, userId, and idempotencyKey are required');
+     if (!orderId || !amountPaise || !userId || !idempotencyKey) {
+          throw new BadRequestError('orderId, amountPaise, userId, and idempotencyKey are required');
      }
 
-     const result = await paymentService.createPaymentOrder(orderId, amount, userId, idempotencyKey);
+     const result = await paymentService.createPaymentOrder(orderId, amountPaise, userId, idempotencyKey);
 
      res.status(201).json({ success: true, data: result });
 };
@@ -18,6 +18,11 @@ exports.getPaymentOrder = async (req, res) => {
 
      const result = await paymentService.getPaymentOrder(paymentOrderId);
 
+     res.status(200).json({ success: true, data: result });
+};
+
+exports.cancelPaymentOrder = async (req, res) => {
+     const result = await paymentService.cancelPaymentOrder(req.params.paymentOrderId);
      res.status(200).json({ success: true, data: result });
 };
 
@@ -39,13 +44,13 @@ exports.verifyAndCapturePayment = async (req, res) => {
 };
 
 exports.initiateRefund = async (req, res) => {
-     const { paymentOrderId, amount, reason, idempotencyKey } = req.body;
+     const { paymentOrderId, amountPaise, reason, idempotencyKey } = req.body;
 
-     if (!paymentOrderId || !amount || !idempotencyKey) {
-          throw new BadRequestError('paymentOrderId, amount, and idempotencyKey are required');
+     if (!paymentOrderId || !amountPaise || !idempotencyKey) {
+          throw new BadRequestError('paymentOrderId, amountPaise, and idempotencyKey are required');
      }
 
-     const result = await paymentService.initiateRefund(paymentOrderId, amount, reason, idempotencyKey);
+     const result = await paymentService.initiateRefund(paymentOrderId, amountPaise, reason, idempotencyKey);
 
      res.status(201).json({ success: true, data: result });
 };

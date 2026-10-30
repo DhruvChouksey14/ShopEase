@@ -3,6 +3,7 @@ const { internalAuth } = require('../middlewares/internalAuth.middleware');
 const {
      createPaymentOrder,
      getPaymentOrder,
+     cancelPaymentOrder,
      verifyAndCapturePayment,
      initiateRefund,
 } = require('../controllers/payment.controller');
@@ -12,6 +13,7 @@ const router = express.Router();
 // Internal routes (called by booking-service)
 router.post('/orders', internalAuth, createPaymentOrder);
 router.get('/orders/:paymentOrderId', internalAuth, getPaymentOrder);
+router.post('/orders/:paymentOrderId/cancel', internalAuth, cancelPaymentOrder);
 router.post('/orders/:paymentOrderId/verify', internalAuth, verifyAndCapturePayment);
 router.post('/refunds', internalAuth, initiateRefund);
 
