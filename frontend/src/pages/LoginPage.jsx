@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '../store/auth.store';
 import { authApi } from '../api/auth.api';
@@ -19,21 +19,58 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [regData, setRegData] = useState({ firstName: '', lastName: '', email: '', password: '', confirmPassword: '' });
   const [otp, setOtp] = useState('');
+  const [captchaRequired, setCaptchaRequired] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState('');
+  const captchaRef = useRef(null);
 
   const redirect = searchParams.get('redirect') || '/';
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+  const recaptchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY || '';
+
+  useEffect(() => {
+    if (!captchaRequired || !recaptchaSiteKey || !captchaRef.current) return undefined;
+    const existing = document.querySelector('script[data-shopease-recaptcha]');
+    const script = existing || document.createElement('script');
+    const renderWidget = () => {
+      if (window.grecaptcha && captchaRef.current && !captchaRef.current.dataset.rendered) {
+        window.grecaptcha.render(captchaRef.current, {
+          sitekey: recaptchaSiteKey,
+          callback: setCaptchaToken,
+          'expired-callback': () => setCaptchaToken(''),
+        });
+        captchaRef.current.dataset.rendered = 'true';
+      }
+    };
+    if (existing) renderWidget();
+    else {
+      script.src = 'https://www.google.com/recaptcha/api.js?render=explicit';
+      script.async = true;
+      script.defer = true;
+      script.dataset.shopeeaseRecaptcha = 'true';
+      script.onload = renderWidget;
+      document.head.appendChild(script);
+    }
+    return undefined;
+  }, [captchaRequired, recaptchaSiteKey]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
     setLoading(true);
     try {
-      const res = await authApi.login(email, password);
+      const res = await authApi.login(email, password, captchaToken);
       const user = res.loggedInUser || res.data?.user || res.data;
       setUser(user);
+      setCaptchaRequired(false);
+      setCaptchaToken('');
       showToast('Login successful!', 'success');
       navigate(redirect, { replace: true });
     } catch (err) {
+      if (err.code === 'CAPTCHA_REQUIRED') setCaptchaRequired(true);
+      if (err.code === 'CAPTCHA_INVALID') {
+        setCaptchaToken('');
+        if (window.grecaptcha && captchaRef.current) window.grecaptcha.reset();
+      }
       setError(err.message || 'Login failed');
     } finally {
       setLoading(false);
@@ -151,6 +188,8 @@ export default function LoginPage() {
             <form onSubmit={handleLogin} className="space-y-4">
               <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Enter your email" required />
               <Input label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" required />
+              {captchaRequired && recaptchaSiteKey && <div ref={captchaRef} className="min-h-20" />}
+              {captchaRequired && !recaptchaSiteKey && <p className="text-sm text-rose-600">CAPTCHA is required, but VITE_RECAPTCHA_SITE_KEY is not configured.</p>}
               <Button type="submit" loading={loading} className="w-full">Sign In</Button>
 
               {googleClientId && (
