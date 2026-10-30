@@ -10,6 +10,7 @@ import { formatCurrency } from '../utils/format';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import Spinner from '../components/ui/Spinner';
+import { aiApi } from '../api/ai.api';
 
 export default function CheckoutPage() {
   const { items, subtotal, fetchCart, clearLocal } = useCartStore();
@@ -46,6 +47,7 @@ export default function CheckoutPage() {
         onSuccess: async (response) => {
           try {
             await orderApi.verifyPayment(orderId, response.razorpay_payment_id, response.razorpay_signature);
+            items.forEach((item) => aiApi.trackEvent({ eventType: 'purchase', productId: item.productId }));
             clearLocal();
             showToast('Payment successful! Your order is confirmed.', 'success');
             navigate(`/orders/${orderId}`);
