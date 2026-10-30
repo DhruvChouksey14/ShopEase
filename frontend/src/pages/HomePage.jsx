@@ -3,11 +3,16 @@ import { Link } from 'react-router-dom';
 import { catalogApi } from '../api/catalog.api';
 import ProductGrid from '../components/product/ProductGrid';
 import Spinner from '../components/ui/Spinner';
+import { aiApi } from '../api/ai.api';
+import { useAuthStore } from '../store/auth.store';
+import RecommendationSection from '../components/ai/RecommendationSection';
 
 export default function HomePage() {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [popular, setPopular] = useState([]);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
 
   useEffect(() => {
     Promise.all([catalogApi.getProducts({ limit: 8 }), catalogApi.getCategories()])
@@ -17,6 +22,8 @@ export default function HomePage() {
       })
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => { aiApi.popular().then(setPopular).catch(() => setPopular([])); }, []);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-10 space-y-12">
@@ -56,6 +63,11 @@ export default function HomePage() {
           <ProductGrid products={products} />
         )}
       </section>
+      {popular.length > 0 && <section>
+        <h2 className="text-xl font-bold text-slate-900 mb-4">Popular right now</h2>
+        <ProductGrid products={popular} />
+      </section>}
+      <RecommendationSection source={isAuthenticated ? 'user' : 'popular'} title={isAuthenticated ? 'Recommended for you' : 'Trending now'} />
     </div>
   );
 }
