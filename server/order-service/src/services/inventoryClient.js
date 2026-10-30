@@ -62,6 +62,18 @@ const inventoryClient = {
                return data.data;
           });
      },
+     async restockConfirmedStock(orderId, items) {
+          return withRetry(async () => {
+               const { data } = await client.post('/restock', { orderId, items });
+               return data.data;
+          });
+     },
+     async extendReservation(orderId, ttlSeconds) {
+          return withRetry(async () => {
+               const { data } = await client.post('/extend', { orderId, ttlSeconds });
+               return data.data;
+          });
+     },
 };
 
 module.exports = { inventoryClient, extractError };

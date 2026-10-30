@@ -34,9 +34,9 @@ function extractError(error) {
 }
 
 const paymentClient = {
-     async createPaymentOrder(orderId, amount, userId, idempotencyKey) {
+     async createPaymentOrder(orderId, amountPaise, userId, idempotencyKey) {
           return withRetry(async () => {
-               const { data } = await client.post('/orders', { orderId, amount, userId, idempotencyKey });
+               const { data } = await client.post('/orders', { orderId, amountPaise, userId, idempotencyKey });
                return data.data;
           });
      },
@@ -48,6 +48,13 @@ const paymentClient = {
           });
      },
 
+     async closePaymentOrder(paymentOrderId) {
+          return withRetry(async () => {
+               const { data } = await client.post(`/orders/${paymentOrderId}/cancel`);
+               return data.data;
+          });
+     },
+
      async verifyPayment(paymentOrderId, gatewayPaymentId, gatewaySignature) {
           return withRetry(async () => {
                const { data } = await client.post(`/orders/${paymentOrderId}/verify`, { gatewayPaymentId, gatewaySignature });
@@ -55,9 +62,9 @@ const paymentClient = {
           });
      },
 
-     async initiateRefund(paymentOrderId, amount, reason, idempotencyKey) {
+     async initiateRefund(paymentOrderId, amountPaise, reason, idempotencyKey) {
           return withRetry(async () => {
-               const { data } = await client.post('/refunds', { paymentOrderId, amount, reason, idempotencyKey });
+               const { data } = await client.post('/refunds', { paymentOrderId, amountPaise, reason, idempotencyKey });
                return data.data;
           });
      },
