@@ -26,12 +26,16 @@ const config = {
           PAYMENT_SERVICE_URL: process.env.PAYMENT_SERVICE_URL || 'http://localhost:4006',
           INVENTORY_SERVICE_URL: process.env.INVENTORY_SERVICE_URL || 'http://localhost:4007',
           CART_SERVICE_URL: process.env.CART_SERVICE_URL || 'http://localhost:4008',
+          AI_SERVICE_URL: process.env.AI_SERVICE_URL || 'http://localhost:4009',
      },
 
      SERVICE_TIMEOUT_MS: parseInt(process.env.SERVICE_TIMEOUT_MS || '60000', 10),
 
      CIRCUIT_BREAKER_THRESHOLD: parseInt(process.env.CIRCUIT_BREAKER_THRESHOLD || '5', 10),
      CIRCUIT_BREAKER_TIMEOUT: parseInt(process.env.CIRCUIT_BREAKER_TIMEOUT || '60000', 10),
+     CIRCUIT_BREAKER_WINDOW_MS: parseInt(process.env.CIRCUIT_BREAKER_WINDOW_MS || '10000', 10),
+     CIRCUIT_BREAKER_MIN_REQUESTS: parseInt(process.env.CIRCUIT_BREAKER_MIN_REQUESTS || '10', 10),
+     CIRCUIT_BREAKER_FAILURE_RATE: Number(process.env.CIRCUIT_BREAKER_FAILURE_RATE || '0.5'),
 };
 
 const requiredConfig = ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'INTERNAL_SERVICE_KEY'];
