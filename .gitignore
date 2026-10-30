@@ -84,6 +84,13 @@ $RECYCLE.BIN/
 
 # Linux
 *~
+__pycache__/
+*.pyc
+.venv/
+data/
+server/recommendation-service/models/
+server/recommendation-service/.venv/
+server/recommendation-service/reports/
 .directory
 
 # ============ Testing ============
