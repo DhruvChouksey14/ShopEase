@@ -6,7 +6,9 @@ const { paymentClient } = require('./paymentClient');
 const { userClient } = require('./userClient');
 const { cartClient } = require('./cartClient');
 const saga = require('./saga.service');
+const { enqueuePaymentRetry } = require('./paymentRetry.service');
 const orderProducer = require('../kafka/producer/order.producer');
+const { processOrderConfirmedOutbox } = require('./orderOutbox.service');
 const { publishToQueue } = require('../../../../shared/rabbitmq/rabbitmq');
 const { emitOrderStatus } = require('../sockets/io');
 const { BadRequestError, NotFoundError, ConflictError, StaleStateError } = require('../utils/error');
@@ -33,6 +35,12 @@ const notifyStatus = async (order, status, extra = {}) => {
      emitOrderStatus(order.userId, { orderId: order.id, status, ...extra });
 };
 
+const presentOrder = (order) => ({
+     ...order,
+     totalAmount: order.totalAmountPaise / 100,
+     items: order.items?.map((item) => ({ ...item, price: item.pricePaise / 100 })),
+});
+
 const fetchUserForNotification = async (userId) => {
      try {
           const user = await userClient.getUserById(userId);
@@ -49,7 +57,12 @@ const checkIdempotency = async (key) => {
      const existing = await prisma.idempotencyRecord.findUnique({ where: { eventKey: key } });
      if (existing) {
           console.log(`Idempotent request: ${key}`);
-          return existing.response;
+          const response = existing.response;
+          if (key.startsWith('order:') && response?.paymentOrder && response.paymentOrder.amountPaise == null) {
+               const amountPaise = Math.round(Number(response.paymentOrder.amount) * 100);
+               return { ...response, paymentOrder: { ...response.paymentOrder, amount: amountPaise, amountPaise } };
+          }
+          return response;
      }
      return null;
 };
@@ -82,21 +95,22 @@ const createOrder = async (userId, shippingAddress, idempotencyKey) => {
      const productMap = new Map(products.map((p) => [p.id, p]));
 
      const orderItems = [];
-     let totalAmount = 0;
+     let totalAmountPaise = 0;
      for (const item of cart.items) {
           const product = productMap.get(item.productId);
           if (!product || !product.isActive) {
                throw new NotFoundError(`Product ${item.productId} is no longer available`);
           }
+          const pricePaise = product.pricePaise;
           orderItems.push({
                productId: product.id,
                sku: product.sku,
                name: product.name,
-               price: product.price,
+               pricePaise,
                quantity: item.quantity,
                imageUrl: product.images?.[0] || null,
           });
-          totalAmount += product.price * item.quantity;
+          totalAmountPaise += pricePaise * item.quantity;
      }
 
      let order;
@@ -106,7 +120,7 @@ const createOrder = async (userId, shippingAddress, idempotencyKey) => {
                data: {
                     userId,
                     status: 'PENDING',
-                    totalAmount,
+                    totalAmountPaise,
                     idempotencyKey,
                     lockExpiresAt,
                     shippingAddress,
@@ -136,13 +150,14 @@ const createOrder = async (userId, shippingAddress, idempotencyKey) => {
           const response = {
                orderId: order.id,
                status: order.status,
-               totalAmount: order.totalAmount,
+               totalAmount: order.totalAmountPaise / 100,
                lockExpiresAt: order.lockExpiresAt,
-               items: order.items.map((i) => ({ productId: i.productId, name: i.name, price: i.price, quantity: i.quantity, imageUrl: i.imageUrl })),
+               items: order.items.map((i) => ({ productId: i.productId, name: i.name, price: i.pricePaise / 100, quantity: i.quantity, imageUrl: i.imageUrl })),
                paymentOrder: {
                     paymentOrderId: paymentOrder.paymentOrderId,
                     gatewayOrderId: paymentOrder.gatewayOrderId,
                     amount: paymentOrder.amount,
+                    amountPaise: paymentOrder.amountPaise,
                     currency: paymentOrder.currency,
                     keyId: paymentOrder.keyId,
                },
@@ -178,7 +193,20 @@ const handlePaymentSuccess = async (paymentOrderId) => {
           console.log(`Order ${order.id} already confirmed`);
           return;
      }
-     if (order.status !== 'PAYMENT_PENDING') {
+     if (!['PAYMENT_PENDING', 'CONFIRMING'].includes(order.status)) {
+          if (['EXPIRED', 'CANCELLED', 'FAILED', 'CANCELLING'].includes(order.status)) {
+               await prisma.order.updateMany({ where: { id: order.id, paymentStatus: 'UNPAID' }, data: { paymentStatus: 'CAPTURED' } });
+               if (order.paymentOrderId) {
+                    const amountPaise = order.totalAmountPaise;
+                    try {
+                         await paymentClient.initiateRefund(order.paymentOrderId, amountPaise, 'payment_after_terminal_order', `${order.id}-late-payment-refund`);
+                    } catch (error) {
+                         await enqueuePaymentRetry({ orderId: order.id, paymentOrderId: order.paymentOrderId, amountPaise, reason: 'payment_after_terminal_order', idempotencyKey: `${order.id}-late-payment-refund` });
+                         console.error('Late payment refund queued for retry', { orderId: order.id, error: error.message });
+                    }
+               }
+               return;
+          }
           console.warn(`Order ${order.id} in unexpected status: ${order.status}`);
           return;
      }
@@ -186,28 +214,31 @@ const handlePaymentSuccess = async (paymentOrderId) => {
      const stockItems = order.items.map((i) => ({ productId: i.productId, quantity: i.quantity }));
 
      try {
-          await casUpdateOrder(order.id, order.version, { status: 'CONFIRMING' });
+          if (order.status === 'PAYMENT_PENDING') await casUpdateOrder(order.id, order.version, { status: 'CONFIRMING' });
+          await prisma.order.update({ where: { id: order.id }, data: { paymentStatus: 'CAPTURED' } });
+          order.paymentStatus = 'CAPTURED';
 
           // Saga Step 3: permanently confirm the stock deduction
           await saga.executeConfirmStock(order, stockItems);
 
-          await prisma.order.updateMany({ where: { id: order.id, status: 'CONFIRMING' }, data: { status: 'CONFIRMED', version: { increment: 1 } } });
-          await notifyStatus(order, 'CONFIRMED');
-
-          try {
-               const userInfo = await fetchUserForNotification(order.userId);
-               await orderProducer.publishOrderConfirmed({
-                    orderId: order.id,
-                    userId: order.userId,
-                    email: userInfo.email,
-                    firstName: userInfo.firstName,
-                    items: order.items.map((i) => ({ name: i.name, price: i.price, quantity: i.quantity })),
-                    totalAmount: order.totalAmount,
-                    shippingAddress: order.shippingAddress,
+          const confirmedEvent = {
+               orderId: order.id,
+               userId: order.userId,
+               items: order.items.map((i) => ({ productId: i.productId, name: i.name, price: i.pricePaise / 100, quantity: i.quantity })),
+               totalAmount: order.totalAmountPaise / 100,
+               shippingAddress: order.shippingAddress,
+          };
+          await prisma.$transaction(async (tx) => {
+               const changed = await tx.order.updateMany({ where: { id: order.id, status: 'CONFIRMING' }, data: { status: 'CONFIRMED', version: { increment: 1 } } });
+               if (!changed.count) throw new StaleStateError(`Order ${order.id} left CONFIRMING before confirmation committed`);
+               await tx.orderOutbox.upsert({
+                    where: { eventKey: `order-confirmed:${order.id}` },
+                    update: {},
+                    create: { eventKey: `order-confirmed:${order.id}`, eventType: 'ORDER_CONFIRMED', payload: confirmedEvent },
                });
-          } catch (err) {
-               console.error('CRITICAL: Failed to publish ORDER_CONFIRMED after retries', { orderId: order.id, error: err.message });
-          }
+          });
+          await notifyStatus(order, 'CONFIRMED');
+          await processOrderConfirmedOutbox().catch((err) => console.error('Order confirmation outbox polling failed', { error: err.message }));
 
           // Background job (RabbitMQ, with retry + DLQ): generate & email the PDF invoice.
           // Decoupled from the critical path — invoice delivery failing should never
@@ -216,8 +247,8 @@ const handlePaymentSuccess = async (paymentOrderId) => {
                await publishToQueue('orders.invoice', {
                     orderId: order.id,
                     userId: order.userId,
-                    items: order.items.map((i) => ({ name: i.name, price: i.price, quantity: i.quantity })),
-                    totalAmount: order.totalAmount,
+                    items: order.items.map((i) => ({ name: i.name, price: i.pricePaise / 100, quantity: i.quantity })),
+                    totalAmount: order.totalAmountPaise / 100,
                     shippingAddress: order.shippingAddress,
                     confirmedAt: new Date().toISOString(),
                });
@@ -233,6 +264,8 @@ const handlePaymentSuccess = async (paymentOrderId) => {
           }
 
           console.error(`Failed to confirm order ${order.id}`, { error: error.message });
+
+          order.paymentStatus = 'CAPTURED';
 
           await saga.compensateAll(order, stockItems);
           await prisma.order.updateMany({
@@ -300,6 +333,7 @@ const cancelOrder = async (orderId, userId) => {
 
      const stockItems = order.items.map((i) => ({ productId: i.productId, quantity: i.quantity }));
      let refundInitiated = false;
+     let refundQueued = false;
 
      try {
           await casUpdateOrder(order.id, order.version, { status: 'CANCELLING', failureReason: 'user_cancelled' });
@@ -313,26 +347,50 @@ const cancelOrder = async (orderId, userId) => {
 
      if (order.status === 'CONFIRMED') {
           try {
-               await inventoryClient.releaseStock(order.id, stockItems);
+               await inventoryClient.restockConfirmedStock(order.id, stockItems);
           } catch (error) {
                console.error(`Failed to release stock for order ${order.id}`, { error: error.message });
                await prisma.order.updateMany({ where: { id: order.id, status: 'CANCELLING' }, data: { status: 'CONFIRMED', failureReason: null, version: { increment: 1 } } });
                throw error;
           }
 
-          if (order.paymentOrderId) {
+          if (order.paymentOrderId && order.paymentStatus === 'CAPTURED') {
                try {
-                    await paymentClient.initiateRefund(order.paymentOrderId, order.totalAmount, 'user_cancelled', `${order.id}-cancel-refund`);
+                    await paymentClient.initiateRefund(order.paymentOrderId, order.totalAmountPaise, 'user_cancelled', `${order.id}-cancel-refund`);
                     refundInitiated = true;
                } catch (error) {
                     console.error(`Failed to initiate refund for order ${order.id}`, { error: error.message });
+                    await enqueuePaymentRetry({ orderId: order.id, paymentOrderId: order.paymentOrderId, amountPaise: order.totalAmountPaise, reason: 'user_cancelled', idempotencyKey: `${order.id}-cancel-refund` });
+                    refundQueued = true;
                }
+          } else if (order.paymentOrderId) {
+               await paymentClient.closePaymentOrder?.(order.paymentOrderId);
           }
      } else if (['STOCK_RESERVED', 'PAYMENT_PENDING'].includes(order.status)) {
           try {
                await inventoryClient.releaseStock(order.id, stockItems);
           } catch (error) {
                console.error('Failed to release stock during cancel', { error: error.message });
+          }
+          if (order.paymentOrderId) {
+               try {
+                    const payment = await paymentClient.closePaymentOrder(order.paymentOrderId);
+                    if (payment.status === 'CAPTURED') {
+                         await prisma.order.updateMany({ where: { id: order.id }, data: { paymentStatus: 'CAPTURED' } });
+                         try {
+                              await paymentClient.initiateRefund(order.paymentOrderId, order.totalAmountPaise, 'user_cancelled', `${order.id}-cancel-refund`);
+                              refundInitiated = true;
+                         } catch (error) {
+                              await enqueuePaymentRetry({ orderId: order.id, paymentOrderId: order.paymentOrderId, amountPaise: order.totalAmountPaise, reason: 'user_cancelled', idempotencyKey: `${order.id}-cancel-refund` });
+                              refundQueued = true;
+                              console.error('Refund for concurrently captured payment queued', { orderId: order.id, error: error.message });
+                         }
+                    }
+               } catch (error) {
+                    // A capture racing the close request is also delivered by the payment outbox;
+                    // terminal orders are refunded by handlePaymentSuccess.
+                    console.warn('Could not close payment order during cancellation', { orderId: order.id, error: error.message });
+               }
           }
      }
 
@@ -341,12 +399,12 @@ const cancelOrder = async (orderId, userId) => {
 
      try {
           const userInfo = await fetchUserForNotification(order.userId);
-          await orderProducer.publishOrderCancelled({ orderId: order.id, userId: order.userId, email: userInfo.email, firstName: userInfo.firstName, reason: 'user_cancelled', refundAmount: refundInitiated ? order.totalAmount : 0 });
+          await orderProducer.publishOrderCancelled({ orderId: order.id, userId: order.userId, email: userInfo.email, firstName: userInfo.firstName, reason: 'user_cancelled', refundAmount: refundInitiated ? order.totalAmountPaise / 100 : 0, refundQueued });
      } catch (err) {
           console.error('Failed to publish ORDER_CANCELLED after retries', { orderId: order.id, error: err.message });
      }
 
-     return { orderId: order.id, status: 'CANCELLED', refundInitiated };
+     return { orderId: order.id, status: 'CANCELLED', refundInitiated, refundQueued };
 };
 
 // ─── Admin: mark shipped ─────────────────────────────────────────────────────
@@ -373,7 +431,7 @@ const markShipped = async (orderId, trackingNumber) => {
 const getOrder = async (orderId, userId, isAdmin = false) => {
      const order = await prisma.order.findUnique({ where: { id: orderId }, include: { items: true } });
      if (!order || (!isAdmin && order.userId !== userId)) throw new NotFoundError('Order not found');
-     return order;
+     return presentOrder(order);
 };
 
 const getUserOrders = async (userId, { status, page = 1, limit = 10 } = {}) => {
@@ -386,7 +444,7 @@ const getUserOrders = async (userId, { status, page = 1, limit = 10 } = {}) => {
           prisma.order.count({ where }),
      ]);
 
-     return { orders, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+     return { orders: orders.map(presentOrder), pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
 };
 
 const getAllOrders = async ({ status, page = 1, limit = 20 } = {}) => {
@@ -399,7 +457,7 @@ const getAllOrders = async ({ status, page = 1, limit = 20 } = {}) => {
           prisma.order.count({ where }),
      ]);
 
-     return { orders, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+     return { orders: orders.map(presentOrder), pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
 };
 
 // ─── Verify Payment (client-side confirmation right after Razorpay checkout) ─

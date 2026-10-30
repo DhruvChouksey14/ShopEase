@@ -1,6 +1,9 @@
 const prisma = require('../config/prisma');
 const { inventoryClient } = require('./inventoryClient');
 const { paymentClient } = require('./paymentClient');
+const { enqueuePaymentRetry } = require('./paymentRetry.service');
+const { enqueueInventoryRetry } = require('./inventoryRetry.service');
+const { config } = require('../config');
 
 /**
  * Saga orchestrator for the order lifecycle (orchestration-based Saga pattern).
@@ -37,11 +40,13 @@ async function executeReserveStock(order, items) {
 async function executeCreatePayment(order) {
      const idempotencyKey = `${order.id}-payment`;
      const sagaLog = await prisma.sagaLog.create({
-          data: { orderId: order.id, step: 'CREATE_PAYMENT', status: 'PENDING', request: { orderId: order.id, amount: order.totalAmount } },
+          data: { orderId: order.id, step: 'CREATE_PAYMENT', status: 'PENDING', request: { orderId: order.id, amountPaise: order.totalAmountPaise } },
      });
 
      try {
-          const result = await paymentClient.createPaymentOrder(order.id, order.totalAmount, order.userId, idempotencyKey);
+          const result = await paymentClient.createPaymentOrder(order.id, order.totalAmountPaise, order.userId, idempotencyKey);
+
+          await inventoryClient.extendReservation(order.id, config.ORDER_TTL_SECONDS + 300);
 
           await prisma.sagaLog.update({ where: { id: sagaLog.id }, data: { status: 'COMPLETED', response: result } });
           await prisma.order.update({ where: { id: order.id }, data: { status: 'PAYMENT_PENDING', paymentOrderId: result.paymentOrderId } });
@@ -84,22 +89,23 @@ async function compensateReserveStock(order, items) {
           });
      } catch (error) {
           console.error(`Failed to compensate RESERVE_STOCK for order ${order.id}`, { error: error.message });
-          // The reservation-expiry sweep in inventory-service is the safety net if this fails.
+          await enqueueInventoryRetry({ orderId: order.id, operation: 'RELEASE', items, idempotencyKey: `${order.id}-release-reservation-retry` });
      }
 }
 
 async function compensateCreatePayment(order) {
-     if (!order.paymentOrderId) return;
+     if (!order.paymentOrderId || order.paymentStatus !== 'CAPTURED') return;
      console.log(`Compensating CREATE_PAYMENT for order ${order.id}`);
      try {
           const idempotencyKey = `${order.id}-refund-compensation`;
-          await paymentClient.initiateRefund(order.paymentOrderId, order.totalAmount, 'order_compensation', idempotencyKey);
+          await paymentClient.initiateRefund(order.paymentOrderId, order.totalAmountPaise, 'order_compensation', idempotencyKey);
           await prisma.sagaLog.updateMany({
                where: { orderId: order.id, step: 'CREATE_PAYMENT', status: 'COMPLETED' },
                data: { status: 'COMPENSATED' },
           });
      } catch (error) {
           console.error(`Failed to compensate CREATE_PAYMENT for order ${order.id}`, { error: error.message });
+          await enqueuePaymentRetry({ orderId: order.id, paymentOrderId: order.paymentOrderId, amountPaise: order.totalAmountPaise, reason: 'order_compensation', idempotencyKey: `${order.id}-refund-compensation` });
      }
 }
 
@@ -108,13 +114,14 @@ async function compensateConfirmStock(order, items) {
      try {
           // Stock was already permanently decremented — compensating a confirm means
           // giving the stock back (treat exactly like a release).
-          await inventoryClient.releaseStock(order.id, items);
+          await inventoryClient.restockConfirmedStock(order.id, items);
           await prisma.sagaLog.updateMany({
                where: { orderId: order.id, step: 'CONFIRM_STOCK', status: 'COMPLETED' },
                data: { status: 'COMPENSATED' },
           });
      } catch (error) {
           console.error(`Failed to compensate CONFIRM_STOCK for order ${order.id}`, { error: error.message });
+          await enqueueInventoryRetry({ orderId: order.id, operation: 'RESTOCK', items, idempotencyKey: `${order.id}-restock-confirmed-retry` });
      }
 }
 
