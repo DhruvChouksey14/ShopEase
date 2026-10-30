@@ -3,6 +3,10 @@ const { esClient, PRODUCT_INDEX } = require('../config/elasticsearch');
 // ─── Indexing (called from Kafka consumer) ───────────────────────────────────
 
 const indexProduct = async (product) => {
+     const pricePaise = Number.isInteger(product.pricePaise) ? product.pricePaise : Math.round(Number(product.price) * 100);
+     const compareAtPricePaise = Number.isInteger(product.compareAtPricePaise)
+          ? product.compareAtPricePaise
+          : (product.compareAtPrice == null ? null : Math.round(Number(product.compareAtPrice) * 100));
      await esClient.index({
           index: PRODUCT_INDEX,
           id: product.id,
@@ -14,8 +18,8 @@ const indexProduct = async (product) => {
                brand: product.brand || '',
                categoryId: product.categoryId,
                categoryName: product.category?.name || '',
-               price: product.price,
-               compareAtPrice: product.compareAtPrice || null,
+               price: pricePaise / 100,
+               compareAtPrice: compareAtPricePaise == null ? null : compareAtPricePaise / 100,
                images: product.images || [],
                isActive: product.isActive !== false,
                inStock: true, // corrected shortly after by a STOCK_UPDATED event

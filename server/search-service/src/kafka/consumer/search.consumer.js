@@ -9,13 +9,14 @@ class SearchConsumer {
           await connectProducer();
           console.log('Search consumer connected to Kafka');
 
-          await consumer.subscribe({
-               topics: [
+          const topics = [
                     KAFKA_TOPICS.PRODUCT_CREATED,
                     KAFKA_TOPICS.PRODUCT_UPDATED,
                     KAFKA_TOPICS.PRODUCT_DELETED,
                     KAFKA_TOPICS.STOCK_UPDATED,
-               ],
+               ];
+          await consumer.subscribe({
+               topics: [...topics, ...topics.map((topic) => `${topic}.retry`)],
                fromBeginning: true,
           });
 
