@@ -2,6 +2,8 @@ const prisma = require('../config/prisma');
 const producer = require('../kafka/producer/catalog.producer');
 const { slugify } = require('./category.service');
 const { NotFoundError, ConflictError, BadRequestError } = require('../utils/error');
+const toPaise = (rupees) => Math.round(Number(rupees) * 100);
+const presentProduct = (product) => product && ({ ...product, price: product.pricePaise / 100, compareAtPrice: product.compareAtPricePaise == null ? null : product.compareAtPricePaise / 100 });
 
 const createProduct = async (data) => {
      const { sku, name, description, price, compareAtPrice, images, categoryId, brand, attributes, initialStock } = data;
@@ -26,8 +28,8 @@ const createProduct = async (data) => {
                name,
                slug,
                description,
-               price,
-               compareAtPrice: compareAtPrice || null,
+               pricePaise: toPaise(price),
+               compareAtPricePaise: compareAtPrice == null ? null : toPaise(compareAtPrice),
                images: images || [],
                categoryId,
                brand,
@@ -44,7 +46,7 @@ const createProduct = async (data) => {
           console.error('Failed to publish PRODUCT_CREATED after retries — search/inventory may be stale', { error: err.message });
      }
 
-     return product;
+     return presentProduct(product);
 };
 
 const updateProduct = async (productId, data) => {
@@ -61,8 +63,8 @@ const updateProduct = async (productId, data) => {
           data: {
                name: data.name ?? product.name,
                description: data.description ?? product.description,
-               price: data.price ?? product.price,
-               compareAtPrice: data.compareAtPrice ?? product.compareAtPrice,
+               pricePaise: data.price !== undefined ? toPaise(data.price) : product.pricePaise,
+               compareAtPricePaise: data.compareAtPrice !== undefined ? (data.compareAtPrice == null ? null : toPaise(data.compareAtPrice)) : product.compareAtPricePaise,
                images: data.images ?? product.images,
                categoryId: data.categoryId ?? product.categoryId,
                brand: data.brand ?? product.brand,
@@ -78,7 +80,7 @@ const updateProduct = async (productId, data) => {
           console.error('Failed to publish PRODUCT_UPDATED after retries', { error: err.message });
      }
 
-     return updated;
+     return presentProduct(updated);
 };
 
 const deleteProduct = async (productId) => {
@@ -106,17 +108,17 @@ const getAllProducts = async ({ categoryId, page = 1, limit = 20, includeInactiv
           prisma.product.count({ where }),
      ]);
 
-     return { products, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+     return { products: products.map(presentProduct), pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
 };
 
 const getProductById = async (productId) => {
      const product = await prisma.product.findUnique({ where: { id: productId }, include: { category: true } });
      if (!product) throw new NotFoundError('Product not found');
-     return product;
+     return presentProduct(product);
 };
 
 const getProductsByIds = async (ids) => {
-     return prisma.product.findMany({ where: { id: { in: ids } }, include: { category: true } });
+     return (await prisma.product.findMany({ where: { id: { in: ids } }, include: { category: true } })).map(presentProduct);
 };
 
 module.exports = { createProduct, updateProduct, deleteProduct, getAllProducts, getProductById, getProductsByIds };
