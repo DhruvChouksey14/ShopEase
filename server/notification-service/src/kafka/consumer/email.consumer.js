@@ -10,15 +10,16 @@ class EmailConsumer {
                await connectProducer(); // needed for DLQ publishing
                console.log('Email consumer connected to Kafka');
 
-               await consumer.subscribe({
-                    topics: [
+               const topics = [
                          KAFKA_TOPICS.OTP_EMAIL,
                          KAFKA_TOPICS.WELCOME_EMAIL,
                          KAFKA_TOPICS.ORDER_CONFIRMED,
                          KAFKA_TOPICS.ORDER_FAILED,
                          KAFKA_TOPICS.ORDER_CANCELLED,
                          KAFKA_TOPICS.ORDER_SHIPPED,
-                    ],
+                    ];
+               await consumer.subscribe({
+                    topics: [...topics, ...topics.map((topic) => `${topic}.retry`)],
                     fromBeginning: false,
                });
 
