@@ -1,7 +1,7 @@
 const express = require('express');
 const { requireAuth, requireAdmin } = require('../middlewares/auth.middleware');
 const { createProxy, getCircuitBreakerStatus } = require('../services/proxy');
-const { endpointRateLimit, combinedRateLimit } = require('../middlewares/rateLimiting.middleware');
+const { endpointRateLimit, combinedRateLimit, userRateLimit } = require('../middlewares/rateLimiting.middleware');
 const { config } = require('../config');
 
 const router = express.Router();
@@ -13,7 +13,7 @@ const userServiceProxy = createProxy('userService', config.SERVICES.USER_SERVICE
 
 router.post('/users/auth/send-otp', endpointRateLimit(5, 3600000), userServiceProxy);
 router.post('/users/auth/verify-otp', endpointRateLimit(10, 3600000), userServiceProxy);
-router.post('/users/auth/login', endpointRateLimit(100, 900000), userServiceProxy);
+router.post('/users/auth/login', endpointRateLimit(10, 900000, true), userServiceProxy);
 router.post('/users/auth/google-auth', endpointRateLimit(10, 900000), userServiceProxy);
 router.post('/users/auth/refresh', endpointRateLimit(20, 900000), userServiceProxy);
 router.post('/users/auth/logout', requireAuth, combinedRateLimit(), userServiceProxy);
@@ -69,6 +69,17 @@ router.delete('/cart/items/:productId', requireAuth, combinedRateLimit(), cartSe
 router.delete('/cart', requireAuth, combinedRateLimit(), cartServiceProxy);
 
 // ===========================
+// AI SHOPPING ASSISTANT AND RECOMMENDATIONS
+// ===========================
+const aiServiceProxy = createProxy('aiService', config.SERVICES.AI_SERVICE_URL);
+router.post('/ai/chat', requireAuth, userRateLimit({ max: 20, windowMs: 60000 }), aiServiceProxy);
+router.get('/ai/recommendations/product/:productId', endpointRateLimit(60, 60000), aiServiceProxy);
+router.get('/ai/recommendations/popular', endpointRateLimit(60, 60000), aiServiceProxy);
+router.get('/ai/recommendations/user', endpointRateLimit(60, 60000), aiServiceProxy);
+router.get('/ai/recommendations/cart', endpointRateLimit(60, 60000), aiServiceProxy);
+router.post('/ai/events', endpointRateLimit(30, 60000), aiServiceProxy);
+
+// ===========================
 // ORDER SERVICE ROUTES (checkout saga, cancellation, history)
 // ===========================
 const orderServiceProxy = createProxy('orderService', config.SERVICES.ORDER_SERVICE_URL);
@@ -95,8 +106,8 @@ router.get('/gateway/health', (req, res) => {
      res.status(200).json({ success: true, message: 'API Gateway is healthy', timestamp: new Date().toISOString() });
 });
 
-router.get('/gateway/circuit-breakers', (req, res) => {
-     res.status(200).json({ success: true, circuitBreakers: getCircuitBreakerStatus() });
+router.get('/gateway/circuit-breakers', requireAuth, requireAdmin, async (req, res) => {
+     res.status(200).json({ success: true, circuitBreakers: await getCircuitBreakerStatus() });
 });
 
 module.exports = router;
