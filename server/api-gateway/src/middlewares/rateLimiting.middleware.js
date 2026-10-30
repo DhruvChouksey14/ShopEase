@@ -1,6 +1,7 @@
 const { redis } = require('../config/redis');
 const { config } = require('../config');
 const { TooManyRequestsError } = require('../utils/error');
+const crypto = require('crypto');
 /**
  * Rate limiting strategies:
  * 1. IP-based rate limiting (for unauthenticated users)
@@ -11,7 +12,7 @@ const { TooManyRequestsError } = require('../utils/error');
 /**
  * Generic rate limiter using sliding window algorithm
 **/
-async function rateLimiter(key, maxRequests, windowMs) {
+async function rateLimiter(key, maxRequests, windowMs, failClosed = false) {
      const now = Date.now();
      const windowStart = now - windowMs;
 
@@ -57,7 +58,7 @@ async function rateLimiter(key, maxRequests, windowMs) {
      } catch (err) {
           console.error('Rate limiter error:', err);
           // Fail open - allow request if Redis is down
-          return { allowed: true, remaining: maxRequests };
+          return { allowed: !failClosed, remaining: 0, resetTime: now + windowMs, retryAfter: Math.ceil(windowMs / 1000) };
      }
 }
 
@@ -138,13 +139,18 @@ function userRateLimit(options = {}) {
  * Endpoint-specific rate limiting
  * Example: POST /api/auth/send-otp - 5 requests per hour
 **/
-function endpointRateLimit(maxRequests, windowMs) {
+function endpointRateLimit(maxRequests, windowMs, failClosed = false) {
      return async (req, res, next) => {
           const ip = req.ip || req.connection.remoteAddress;
           const endpoint = `${req.method}:${req.path}`;
           const key = `ratelimit:endpoint:${endpoint}:${ip}`;
 
-          const result = await rateLimiter(key, maxRequests, windowMs);
+          const result = await rateLimiter(key, maxRequests, windowMs, failClosed);
+          if (req.path.endsWith('/login') && typeof req.body?.email === 'string') {
+               const accountKey = crypto.createHash('sha256').update(req.body.email.trim().toLowerCase()).digest('hex');
+               const account = await rateLimiter(`ratelimit:login-account:${accountKey}`, 8, 900000, true);
+               if (!account.allowed) return next(new TooManyRequestsError('Too many login attempts. Try again later.', account.retryAfter));
+          }
 
           res.setHeader('X-RateLimit-Limit', maxRequests);
           res.setHeader('X-RateLimit-Remaining', result.remaining);
