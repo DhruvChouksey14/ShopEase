@@ -11,8 +11,10 @@ router.post('/products/bulk', ctrl.getBulkStock);
 
 // Internal — called by order-service saga
 router.post('/reserve', internalAuth, ctrl.reserveStock);
+router.post('/extend', internalAuth, ctrl.extendReservation);
 router.post('/confirm', internalAuth, ctrl.confirmStock);
 router.post('/release', internalAuth, ctrl.releaseStock);
+router.post('/restock', internalAuth, ctrl.restockConfirmedStock);
 
 // Admin — restock
 router.post('/adjust', internalAuth, getUserContext, requireAdmin, ctrl.adjustStock);

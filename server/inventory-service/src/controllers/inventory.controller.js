@@ -18,6 +18,7 @@ exports.reserveStock = async (req, res) => {
      if (!orderId || !items || !Array.isArray(items) || items.length === 0) {
           throw new BadRequestError('orderId and items (non-empty array) are required');
      }
+     if (items.some((item) => !item.productId || !Number.isSafeInteger(item.quantity) || item.quantity <= 0)) throw new BadRequestError('Each item requires productId and a positive integer quantity');
      const result = await inventoryService.reserveStock(orderId, items, ttlSeconds);
      res.status(200).json({ success: true, message: 'Stock reserved', data: result });
 };
@@ -36,9 +37,23 @@ exports.releaseStock = async (req, res) => {
      res.status(200).json({ success: true, data: result });
 };
 
+exports.restockConfirmedStock = async (req, res) => {
+     const { orderId, items } = req.body;
+     if (!orderId || !items) throw new BadRequestError('orderId and items are required');
+     const result = await inventoryService.restockConfirmedStock(orderId, items);
+     res.status(200).json({ success: true, data: result });
+};
+
+exports.extendReservation = async (req, res) => {
+     const { orderId, ttlSeconds } = req.body;
+     if (!orderId || !Number.isSafeInteger(ttlSeconds) || ttlSeconds <= 0) throw new BadRequestError('orderId and positive integer ttlSeconds are required');
+     const result = await inventoryService.extendReservation(orderId, ttlSeconds);
+     res.status(200).json({ success: true, data: result });
+};
+
 exports.adjustStock = async (req, res) => {
      const { productId, sku, delta } = req.body;
-     if (!productId || delta === undefined) throw new BadRequestError('productId and delta are required');
+     if (!productId || !Number.isSafeInteger(delta)) throw new BadRequestError('productId and integer delta are required');
      const result = await inventoryService.adjustStock(productId, sku, delta);
      res.status(200).json({ success: true, message: 'Stock adjusted', data: result });
 };
