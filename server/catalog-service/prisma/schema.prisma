@@ -26,8 +26,8 @@ model Product {
   name        String
   slug        String   @unique
   description String?
-  price       Float
-  compareAtPrice Float?
+  pricePaise Int @default(0)
+  compareAtPricePaise Int?
   images      String[] @default([])
   categoryId  String
   brand       String?
