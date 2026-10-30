@@ -14,13 +14,12 @@ class RazorpayGateway extends BaseGateway {
           });
      }
 
-     async createOrder(amount, currency, receipt, notes = {}) {
-          const amountInPaise = Math.round(amount * 100);
+     async createOrder(amountPaise, currency, receipt, notes = {}) {
 
           let order;
           try {
                order = await this.client.orders.create({
-                    amount: amountInPaise,
+                    amount: amountPaise,
                     currency,
                     receipt,
                     notes,
@@ -33,11 +32,11 @@ class RazorpayGateway extends BaseGateway {
                throw new BadRequestError(`Payment gateway error: ${description}`, 'PAYMENT_GATEWAY_ERROR');
           }
 
-          console.log(`Razorpay order created: ${order.id}`, { receipt, amount });
+          console.log(`Razorpay order created: ${order.id}`, { receipt, amountPaise });
 
           return {
                gatewayOrderId: order.id,
-               amount: order.amount / 100,
+               amountPaise: order.amount,
                currency: order.currency,
                receipt: order.receipt,
                rawResponse: order,
@@ -79,26 +78,42 @@ class RazorpayGateway extends BaseGateway {
 
           return {
                status: payment.status,
-               amount: payment.amount / 100,
+               amountPaise: payment.amount,
                method: payment.method,
                rawResponse: payment,
           };
      }
 
-     async initiateRefund(paymentId, amount, notes = {}) {
-          const amountInPaise = Math.round(amount * 100);
+     async fetchOrderPayments(orderId) {
+          return this.client.orders.fetchPayments(orderId);
+     }
 
-          const refund = await this.client.payments.refund(paymentId, {
-               amount: amountInPaise,
-               notes,
+     async initiateRefund(paymentId, amountPaise, { reason, orderId, idempotencyKey } = {}) {
+          if (!idempotencyKey || !/^[A-Za-z0-9_-]{10,}$/.test(idempotencyKey)) throw new Error('A valid Razorpay refund idempotency key is required');
+          const response = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}/refund`, {
+               method: 'POST',
+               headers: {
+                    Authorization: `Basic ${Buffer.from(`${this.keyId}:${this.keySecret}`).toString('base64')}`,
+                    'Content-Type': 'application/json',
+                    'X-Refund-Idempotency': idempotencyKey,
+               },
+               body: JSON.stringify({ amount: amountPaise, notes: { reason, orderId } }),
+               signal: AbortSignal.timeout(15000),
           });
+          const refund = await response.json();
+          if (!response.ok) {
+               const error = new Error(refund.error?.description || `Razorpay refund failed (${response.status})`);
+               error.status = response.status;
+               error.gatewayError = refund.error;
+               throw error;
+          }
 
-          console.log(`Razorpay refund initiated: ${refund.id}`, { paymentId, amount });
+          console.log(`Razorpay refund initiated: ${refund.id}`, { paymentId, amountPaise });
 
           return {
                gatewayRefundId: refund.id,
                status: refund.status,
-               amount: refund.amount / 100,
+               amountPaise: refund.amount,
                rawResponse: refund,
           };
      }
@@ -108,7 +123,7 @@ class RazorpayGateway extends BaseGateway {
 
           return {
                status: refund.status,
-               amount: refund.amount / 100,
+               amountPaise: refund.amount,
                rawResponse: refund,
           };
      }

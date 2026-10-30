@@ -13,7 +13,7 @@ class BaseGateway {
 
      /**
       * Create a payment order with the gateway.
-      * @param {number} amount - Amount in base currency (e.g., INR, not paise)
+      * @param {number} amountPaise - Integer amount in paise
       * @param {string} currency - Currency code (e.g., "INR")
       * @param {string} receipt - Unique receipt/reference ID (typically orderId)
       * @param {object} notes - Additional metadata
@@ -56,7 +56,7 @@ class BaseGateway {
      /**
       * Initiate a refund.
       * @param {string} paymentId - Gateway payment ID to refund
-      * @param {number} amount - Refund amount in base currency
+      * @param {number} amountPaise - Integer refund amount in paise
       * @param {object} notes - Additional metadata
       * @returns {Promise<{ gatewayRefundId: string, status: string, amount: number, rawResponse: object }>}
       */
