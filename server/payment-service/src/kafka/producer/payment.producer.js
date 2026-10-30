@@ -63,6 +63,11 @@ class PaymentProducer {
                }
           );
      }
+
+     async publishOutboxEvent(eventType, payload, eventKey) {
+          const topic = eventType === 'PAYMENT_SUCCESS' ? KAFKA_TOPICS.PAYMENT_SUCCESS : KAFKA_TOPICS.PAYMENT_FAILED;
+          return this.sendMessage(topic, eventKey, payload);
+     }
 }
 
 module.exports = new PaymentProducer();

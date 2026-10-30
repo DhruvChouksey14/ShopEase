@@ -11,6 +11,7 @@ const { errorHandler } = require('../../../shared/middlewares/errorHandler');
 
 const prisma = require('./config/prisma');
 const paymentRoutes = require('./routes/payment.route');
+const paymentService = require('./services/payment.service');
 const webhookRoutes = require('./routes/webhook.route');
 
 const app = express();
@@ -63,6 +64,10 @@ app.use(errorHandler);
 // Error handler (must be last)
 const startServer = async () => {
      try {
+          const recoveryInterval = setInterval(() => {
+               paymentService.processPaymentOutbox().catch((err) => console.error('Outbox recovery failed', { error: err.message }));
+               paymentService.reconcileUnconfirmedPayments().catch((err) => console.error('Payment reconciliation failed', { error: err.message }));
+          }, 15000);
           const server = app.listen(config.PORT, () => {
                console.log(
                     `${config.SERVICE_NAME} is running on port ${config.PORT}`
@@ -72,6 +77,7 @@ const startServer = async () => {
           // Graceful shutdown
           const shutdown = async () => {
                console.log('Shutting down gracefully...');
+               clearInterval(recoveryInterval);
                server.close(async () => {
                     await disconnectProducer();
                     console.log('Server closed');
