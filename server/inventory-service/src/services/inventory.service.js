@@ -1,6 +1,5 @@
 const prisma = require('../config/prisma');
 const inventoryProducer = require('../kafka/producer/inventory.producer');
-const { acquireProductLocks, releaseProductLocks } = require('../utils/distributedLock');
 const { BadRequestError, NotFoundError, ConflictError } = require('../utils/error');
 const { config } = require('../config');
 
@@ -12,7 +11,7 @@ async function retryTransaction(fn, maxRetries = 3) {
                const isRetryable =
                     error.code === 'P2034' ||
                     error.message?.includes('could not serialize') ||
-                    error.message?.includes('deadlock detected');
+                    error.message?.includes('deadlock detected') || error.code === 'STALE_STOCK';
                if (isRetryable && attempt < maxRetries) {
                     console.warn(`Transaction attempt ${attempt} failed (retryable), retrying...`);
                     await new Promise((r) => setTimeout(r, 50 * attempt));
@@ -34,7 +33,7 @@ const initializeStock = async (product) => {
      }
 
      await prisma.$transaction(async (tx) => {
-          await tx.stock.upsert({
+          const stock = await tx.stock.upsert({
                where: { productId: product.id },
                update: {},
                create: {
@@ -44,6 +43,8 @@ const initializeStock = async (product) => {
                     reserved: 0,
                },
           });
+          const ledgerRows = await tx.stockLedger.count({ where: { productId: product.id } });
+          if (!ledgerRows) await tx.stockLedger.create({ data: { productId: product.id, delta: stock.available + stock.reserved, reason: 'BASELINE' } });
           await tx.idempotencyRecord.create({ data: { eventKey } });
      });
 
@@ -83,34 +84,26 @@ const reserveStock = async (orderId, items, ttlSeconds = config.LOCK_TTL_SECONDS
           throw new BadRequestError('orderId and items (non-empty array) are required');
      }
 
-     const productIds = items.map((i) => i.productId);
-     const { acquired, lockValue } = await acquireProductLocks(productIds, `order-${orderId}`, ttlSeconds);
-     if (!acquired) {
-          throw new ConflictError('One or more products are being purchased by another order right now. Please retry.', 'PRODUCT_LOCKED');
-     }
-
      try {
           const result = await retryTransaction(() =>
                prisma.$transaction(async (tx) => {
                     const reservedRows = [];
                     for (const item of items) {
-                         const stock = await tx.stock.findUnique({ where: { productId: item.productId } });
-                         if (!stock) throw new NotFoundError(`No stock record for product ${item.productId}`);
-                         if (stock.available < item.quantity) {
-                              throw new ConflictError(`Insufficient stock for product ${item.productId}`, 'INSUFFICIENT_STOCK');
+                         const prior = await tx.stockReservation.findUnique({ where: { orderId_productId: { orderId, productId: item.productId } } });
+                         if (prior?.status === 'HELD' && prior.expiresAt > new Date()) {
+                              reservedRows.push(prior);
+                              continue;
                          }
-
+                         if (prior && !['RELEASED', 'EXPIRED'].includes(prior.status)) throw new ConflictError(`Reservation is already ${prior.status} for ${item.productId}`, 'INVALID_RESERVATION_TRANSITION');
                          const updated = await tx.stock.updateMany({
-                              where: { productId: item.productId, version: stock.version },
+                              where: { productId: item.productId, available: { gte: item.quantity } },
                               data: {
                                    available: { decrement: item.quantity },
                                    reserved: { increment: item.quantity },
                                    version: { increment: 1 },
                               },
                          });
-                         if (updated.count === 0) {
-                              throw new ConflictError(`Stock for product ${item.productId} changed concurrently, please retry`, 'STALE_STOCK');
-                         }
+                         if (updated.count === 0) throw new ConflictError(`Insufficient or concurrently changed stock for product ${item.productId}`, 'INSUFFICIENT_STOCK');
 
                          const reservation = await tx.stockReservation.upsert({
                               where: { orderId_productId: { orderId, productId: item.productId } },
@@ -127,6 +120,7 @@ const reserveStock = async (orderId, items, ttlSeconds = config.LOCK_TTL_SECONDS
                                    expiresAt: new Date(Date.now() + ttlSeconds * 1000),
                               },
                          });
+                         await tx.stockLedger.create({ data: { productId: item.productId, orderId, delta: 0, reason: 'RESERVED' } });
                          reservedRows.push(reservation);
                     }
                     return reservedRows;
@@ -149,8 +143,6 @@ const reserveStock = async (orderId, items, ttlSeconds = config.LOCK_TTL_SECONDS
           // Roll back any partial reservation for this order and rethrow
           await releaseStock(orderId, items).catch(() => {});
           throw error;
-     } finally {
-          await releaseProductLocks(productIds, lockValue);
      }
 };
 
@@ -163,19 +155,25 @@ const confirmStock = async (orderId, items) => {
                     const reservation = await tx.stockReservation.findUnique({
                          where: { orderId_productId: { orderId, productId: item.productId } },
                     });
-                    if (!reservation || reservation.status !== 'HELD') {
-                         console.warn(`No active reservation to confirm for order ${orderId}, product ${item.productId} — treating as already handled`);
-                         continue;
+                    if (reservation?.status === 'CONFIRMED') continue;
+                    if (!reservation) throw new ConflictError(`Reservation for ${item.productId} is missing`, 'RESERVATION_UNAVAILABLE');
+                    if (['RELEASED', 'EXPIRED'].includes(reservation.status)) {
+                         const reclaimed = await tx.stock.updateMany({ where: { productId: item.productId, available: { gte: reservation.quantity } }, data: { available: { decrement: reservation.quantity }, reserved: { increment: reservation.quantity }, version: { increment: 1 } } });
+                         if (!reclaimed.count) throw new ConflictError(`Reservation expired and stock is no longer available for ${item.productId}`, 'RESERVATION_EXPIRED');
+                         const reopened = await tx.stockReservation.updateMany({ where: { id: reservation.id, status: reservation.status }, data: { status: 'HELD', expiresAt: new Date(Date.now() + config.LOCK_TTL_SECONDS * 1000) } });
+                         if (!reopened.count) throw new ConflictError(`Reservation changed concurrently for ${item.productId}`, 'RESERVATION_UNAVAILABLE');
+                         await tx.stockLedger.create({ data: { productId: item.productId, orderId, delta: 0, reason: 'RE_RESERVED_FOR_CAPTURE' } });
+                    } else if (reservation.status !== 'HELD') {
+                         throw new ConflictError(`Reservation for ${item.productId} is ${reservation.status}`, 'RESERVATION_UNAVAILABLE');
                     }
-
-                    await tx.stock.update({
-                         where: { productId: item.productId },
-                         data: { reserved: { decrement: reservation.quantity }, version: { increment: 1 } },
-                    });
-                    await tx.stockReservation.update({
-                         where: { id: reservation.id },
-                         data: { status: 'CONFIRMED' },
-                    });
+                    // If the TTL elapsed but the sweeper has not released this HELD row,
+                    // its stock is still reserved and can be confirmed safely. If the
+                    // sweeper won, the status changed and the reclaim branch above runs.
+                    const changed = await tx.stockReservation.updateMany({ where: { id: reservation.id, status: 'HELD' }, data: { status: 'CONFIRMED' } });
+                    if (!changed.count) throw new ConflictError(`Reservation changed before confirmation for ${item.productId}`, 'RESERVATION_UNAVAILABLE');
+                    const stockChange = await tx.stock.updateMany({ where: { productId: item.productId, reserved: { gte: reservation.quantity } }, data: { reserved: { decrement: reservation.quantity }, version: { increment: 1 } } });
+                    if (!stockChange.count) throw new ConflictError(`Reserved stock is inconsistent for ${item.productId}`, 'STOCK_INVARIANT');
+                    await tx.stockLedger.create({ data: { productId: item.productId, orderId, delta: -reservation.quantity, reason: 'CONFIRMED' } });
                }
           })
      );
@@ -191,24 +189,21 @@ const confirmStock = async (orderId, items) => {
 
 // ─── Release stock (compensation — order failed/cancelled/expired) ──────────
 
-const releaseStock = async (orderId, items) => {
+const releaseStock = async (orderId, items, expiresBefore = null) => {
      await retryTransaction(() =>
           prisma.$transaction(async (tx) => {
                for (const item of items) {
                     const reservation = await tx.stockReservation.findUnique({
                          where: { orderId_productId: { orderId, productId: item.productId } },
                     });
-                    if (!reservation || reservation.status !== 'HELD') continue;
-
-                    await tx.stock.update({
-                         where: { productId: item.productId },
-                         data: {
-                              available: { increment: reservation.quantity },
-                              reserved: { decrement: reservation.quantity },
-                              version: { increment: 1 },
-                         },
-                    });
-                    await tx.stockReservation.update({ where: { id: reservation.id }, data: { status: 'RELEASED' } });
+                    if (!reservation || reservation.status === 'RELEASED' || reservation.status === 'EXPIRED') continue;
+                    if (reservation.status !== 'HELD') throw new ConflictError(`Cannot release reservation in ${reservation.status} state; use restockConfirmedStock`, 'INVALID_RESERVATION_TRANSITION');
+                    const reservationWhere = { id: reservation.id, status: 'HELD' };
+                    if (expiresBefore) reservationWhere.expiresAt = { lte: expiresBefore };
+                    const changed = await tx.stockReservation.updateMany({ where: reservationWhere, data: { status: 'RELEASED' } });
+                    if (!changed.count) continue;
+                    await tx.stock.update({ where: { productId: item.productId }, data: { available: { increment: reservation.quantity }, reserved: { decrement: reservation.quantity }, version: { increment: 1 } } });
+                    await tx.stockLedger.create({ data: { productId: item.productId, orderId, delta: 0, reason: 'RELEASED' } });
                }
           })
      );
@@ -222,16 +217,71 @@ const releaseStock = async (orderId, items) => {
      return { orderId, status: 'RELEASED' };
 };
 
+const extendReservation = async (orderId, ttlSeconds) => {
+     const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
+     const updated = await prisma.stockReservation.updateMany({
+          where: { orderId, status: 'HELD' },
+          data: { expiresAt },
+     });
+     if (!updated.count) throw new ConflictError(`No held reservation to extend for order ${orderId}`, 'RESERVATION_UNAVAILABLE');
+     return { orderId, expiresAt };
+};
+
+const restockConfirmedStock = async (orderId, items) => {
+     await prisma.$transaction(async (tx) => {
+          for (const item of items) {
+               const reservation = await tx.stockReservation.findUnique({ where: { orderId_productId: { orderId, productId: item.productId } } });
+               if (reservation?.status === 'RESTOCKED') continue;
+               if (!reservation || reservation.status !== 'CONFIRMED') throw new ConflictError(`Cannot restock reservation in ${reservation?.status || 'missing'} state`, 'INVALID_RESERVATION_TRANSITION');
+               const changed = await tx.stockReservation.updateMany({ where: { id: reservation.id, status: 'CONFIRMED' }, data: { status: 'RESTOCKED' } });
+               if (!changed.count) continue;
+               await tx.stock.update({ where: { productId: item.productId }, data: { available: { increment: reservation.quantity }, version: { increment: 1 } } });
+               await tx.stockLedger.create({ data: { productId: item.productId, orderId, delta: reservation.quantity, reason: 'RESTOCKED' } });
+          }
+     });
+     return { orderId, status: 'RESTOCKED' };
+};
+
 // ─── Admin: restock / adjust ─────────────────────────────────────────────────
 
 const adjustStock = async (productId, sku, delta) => {
-     const stock = await prisma.stock.upsert({
-          where: { productId },
-          update: { available: { increment: delta }, version: { increment: 1 } },
-          create: { productId, sku, available: Math.max(delta, 0), reserved: 0 },
+     const stock = await prisma.$transaction(async (tx) => {
+          const current = await tx.stock.findUnique({ where: { productId } });
+          let updated;
+          let appliedDelta = delta;
+          if (current) {
+               if (current.available + delta < 0) throw new ConflictError('Adjustment cannot reduce available stock below zero', 'INVALID_STOCK_ADJUSTMENT');
+               updated = await tx.stock.update({ where: { productId }, data: { available: { increment: delta }, version: { increment: 1 } } });
+          } else {
+               appliedDelta = Math.max(delta, 0);
+               updated = await tx.stock.create({ data: { productId, sku, available: appliedDelta, reserved: 0 } });
+          }
+          await tx.stockLedger.create({ data: { productId, delta: appliedDelta, reason: 'ADMIN_ADJUSTMENT' } });
+          return updated;
      });
      await inventoryProducer.publishStockUpdated(stock).catch(() => {});
      return stock;
+};
+
+const reconcileStockLedger = async () => {
+     const stocks = await prisma.stock.findMany({ select: { productId: true, available: true, reserved: true } });
+     const aggregates = await prisma.stockLedger.groupBy({ by: ['productId'], _sum: { delta: true } });
+     const ledgerByProduct = new Map(aggregates.map((row) => [row.productId, row._sum.delta || 0]));
+     const mismatches = [];
+     for (const stock of stocks) {
+          const ledgerTotal = ledgerByProduct.get(stock.productId) || 0;
+          if (ledgerTotal !== stock.available + stock.reserved) {
+               const mismatch = { productId: stock.productId, stockTotal: stock.available + stock.reserved, ledgerTotal };
+               mismatches.push(mismatch);
+               const activeAlert = await prisma.stockLedgerAlert.findFirst({ where: { productId: stock.productId, resolvedAt: null } });
+               if (activeAlert) await prisma.stockLedgerAlert.update({ where: { id: activeAlert.id }, data: { expectedTotal: mismatch.stockTotal, actualTotal: mismatch.ledgerTotal, lastDetectedAt: new Date() } });
+               else await prisma.stockLedgerAlert.create({ data: { productId: stock.productId, expectedTotal: mismatch.stockTotal, actualTotal: mismatch.ledgerTotal } });
+          } else {
+               await prisma.stockLedgerAlert.updateMany({ where: { productId: stock.productId, resolvedAt: null }, data: { resolvedAt: new Date() } });
+          }
+     }
+     if (mismatches.length) console.error('ALERT: inventory ledger reconciliation mismatch', { count: mismatches.length, mismatches });
+     return { checked: stocks.length, mismatches };
 };
 
 // ─── Expiry sweep — reaps abandoned reservations whose order never completed ─
@@ -251,11 +301,9 @@ const sweepExpiredReservations = async () => {
 
      for (const [orderId, items] of byOrder) {
           try {
-               await releaseStock(orderId, items);
-               await prisma.stockReservation.updateMany({
-                    where: { orderId, status: 'RELEASED', updatedAt: { gte: new Date(Date.now() - 5000) } },
-                    data: { status: 'EXPIRED' },
-               });
+               // The expiry predicate is part of the state transition itself. If
+               // checkout extended a hold after the sweep query, this update loses.
+               await releaseStock(orderId, items, new Date());
                console.log(`Swept expired reservation for order ${orderId}`);
           } catch (err) {
                console.error(`Failed to sweep reservation for order ${orderId}`, { error: err.message });
@@ -272,6 +320,9 @@ module.exports = {
      reserveStock,
      confirmStock,
      releaseStock,
+     extendReservation,
+     restockConfirmedStock,
      adjustStock,
      sweepExpiredReservations,
+     reconcileStockLedger,
 };

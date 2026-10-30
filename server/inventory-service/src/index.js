@@ -32,6 +32,7 @@ app.use('/', inventoryRoutes);
 app.use(errorHandler);
 
 let expirySweepInterval;
+let ledgerReconcileInterval;
 
 const startServer = async () => {
      try {
@@ -43,6 +44,10 @@ const startServer = async () => {
                     console.error('Reservation sweep failed', { error: err.message })
                );
           }, config.LOCK_EXPIRY_INTERVAL_MS);
+          inventoryService.reconcileStockLedger().catch((err) => console.error('Initial inventory ledger reconciliation failed', { error: err.message }));
+          ledgerReconcileInterval = setInterval(() => {
+               inventoryService.reconcileStockLedger().catch((err) => console.error('Nightly inventory ledger reconciliation failed', { error: err.message }));
+          }, 24 * 60 * 60 * 1000);
 
           const server = app.listen(config.PORT, () => {
                console.log(`${config.SERVICE_NAME} is running on port ${config.PORT}`);
@@ -51,6 +56,7 @@ const startServer = async () => {
           const shutdown = async () => {
                console.log('Shutting down gracefully...');
                clearInterval(expirySweepInterval);
+               clearInterval(ledgerReconcileInterval);
                server.close(async () => {
                     await disconnectProducer();
                     console.log('Server closed');

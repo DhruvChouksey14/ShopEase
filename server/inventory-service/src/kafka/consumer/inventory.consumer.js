@@ -9,8 +9,9 @@ class InventoryConsumer {
           await connectProducer();
           console.log('Inventory consumer connected to Kafka');
 
+          const topics = [KAFKA_TOPICS.PRODUCT_CREATED, KAFKA_TOPICS.PRODUCT_DELETED];
           await consumer.subscribe({
-               topics: [KAFKA_TOPICS.PRODUCT_CREATED, KAFKA_TOPICS.PRODUCT_DELETED],
+               topics: [...topics, ...topics.map((topic) => `${topic}.retry`)],
                fromBeginning: true,
           });
 
