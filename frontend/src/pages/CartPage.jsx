@@ -7,6 +7,7 @@ import Button from '../components/ui/Button';
 import EmptyState from '../components/ui/EmptyState';
 import Spinner from '../components/ui/Spinner';
 import { formatCurrency } from '../utils/format';
+import RecommendationSection from '../components/ai/RecommendationSection';
 
 export default function CartPage() {
   const { items, subtotal, isLoading, fetchCart, updateItem, removeItem } = useCartStore();
@@ -68,6 +69,7 @@ export default function CartPage() {
           </div>
         </div>
       )}
+      {items.length > 0 && <RecommendationSection source="cart" productId={items.map((item) => item.productId)} title="You may also like" />}
     </div>
   );
 }
