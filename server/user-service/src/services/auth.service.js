@@ -125,12 +125,22 @@ const verifyOTP = async(otp, otpSessionId) =>{
      
 }
 
-const login = async(email, password, deviceId) =>{
+const login = async(email, password, deviceId, captchaToken) =>{
      const existingUser = await prisma.user.findUnique({
           where: {email}
      })
      if(!existingUser){
           throw new UnauthorizedError("Invalid email or password", "INVALID_CREDENTIALS");
+     }
+     const lockKey = `login:lock:${existingUser.id}`;
+     const failureKey = `login:fail:${existingUser.id}`;
+     if (await redis.get(lockKey)) throw new TooManyRequestsError('Account temporarily locked after repeated failed logins.', 'LOGIN_LOCKED');
+     const failedCount = Number(await redis.get(failureKey) || 0);
+     if (failedCount >= 3 && config.RECAPTCHA_SECRET) {
+          if (!captchaToken) throw new TooManyRequestsError('Complete CAPTCHA to continue signing in.', 'CAPTCHA_REQUIRED');
+          const response = await fetch('https://www.google.com/recaptcha/api/siteverify', { method: 'POST', body: new URLSearchParams({ secret: config.RECAPTCHA_SECRET, response: captchaToken }), signal: AbortSignal.timeout(5000) });
+          const verification = await response.json();
+          if (!response.ok || !verification.success) throw new UnauthorizedError('CAPTCHA verification failed', 'CAPTCHA_INVALID');
      }
      if(!existingUser.password){
           throw new BadRequestError(
@@ -140,8 +150,16 @@ const login = async(email, password, deviceId) =>{
      }
      const doesPasswordMatch = await bcrypt.compare(password, existingUser.password);
      if(!doesPasswordMatch){
+          const failures = await redis.incr(failureKey);
+          if (failures === 1) await redis.expire(failureKey, 900);
+          if (failures >= 8) {
+               await redis.set(lockKey, '1', 'EX', 900);
+               await redis.del(failureKey);
+               throw new TooManyRequestsError('Account temporarily locked after repeated failed logins.', 'LOGIN_LOCKED');
+          }
           throw new UnauthorizedError("Invalid email or password", "INVALID_CREDENTIALS");
      }
+     await redis.del(failureKey, lockKey);
      const accessToken = generateAccessToken(existingUser.id, existingUser.role);
      const refreshToken = generateRefreshToken(existingUser.id, existingUser.role);
      const {jti} = jwt.decode(refreshToken);
@@ -181,6 +199,7 @@ const verifyGoogleIdToken = async(idToken, deviceId) =>{
      if(!payload.sub || !payload.email){
           throw new UnauthorizedError("Invalid Google Token Payload")
      }
+     if (payload.email_verified !== true) throw new UnauthorizedError('Google email must be verified before sign-in or account linking', 'GOOGLE_EMAIL_UNVERIFIED');
 
      const googleUser = {
           provider: "google",

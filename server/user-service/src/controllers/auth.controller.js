@@ -66,7 +66,7 @@ exports.login = async (req, res) =>{
           throw new BadRequestError("Email and Password are required")
      }
      const deviceId = getDeviceFingerprint(req);
-     const {accessToken, refreshToken, loggedInUser} = await authService.login(email, password, deviceId);
+     const {accessToken, refreshToken, loggedInUser} = await authService.login(email, password, deviceId, req.body.captchaToken);
      res.cookie("accessToken", accessToken, cookieOptions(config.ACCESS_TOKEN_EXP_SEC * 1000));
      res.cookie("refreshToken", refreshToken, cookieOptions(config.REFRESH_TOKEN_EXP_SEC * 1000));
      res.status(200).json({
