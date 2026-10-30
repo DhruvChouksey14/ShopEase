@@ -10,6 +10,7 @@ enum PaymentOrderStatus {
   CREATED
   CAPTURED
   FAILED
+  CANCELLED
   REFUND_INITIATED
   REFUNDED
   PARTIALLY_REFUNDED
@@ -26,7 +27,7 @@ model PaymentOrder {
   id               String             @id @default(uuid())
   orderId        String
   userId           String
-  amount           Float
+  amountPaise      Int @default(0)
   currency         String             @default("INR")
   status           PaymentOrderStatus @default(CREATED)
   idempotencyKey   String             @unique
@@ -39,6 +40,7 @@ model PaymentOrder {
   version          Int                @default(0)
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
+  lastReconciledAt DateTime?
 
   auditLogs PaymentAuditLog[]
   refunds   Refund[]
@@ -52,7 +54,7 @@ model PaymentOrder {
 model Refund {
   id              String       @id @default(uuid())
   paymentOrderId  String
-  amount          Float
+  amountPaise     Int @default(0)
   reason          String?
   status          RefundStatus @default(INITIATED)
   idempotencyKey  String       @unique
@@ -92,4 +94,19 @@ model IdempotencyRecord {
 
   @@index([eventKey])
   @@map("idempotency_records")
+}
+
+model PaymentOutbox {
+  id String @id @default(uuid())
+  eventKey String @unique
+  eventType String
+  payload Json
+  status String @default("PENDING")
+  attempts Int @default(0)
+  nextAttemptAt DateTime @default(now())
+  lastError String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([status, nextAttemptAt])
+  @@map("payment_outbox")
 }
