@@ -9,8 +9,9 @@ class OrderConsumer {
           await connectProducer();
           console.log('Order consumer connected to Kafka');
 
+          const topics = [KAFKA_TOPICS.PAYMENT_SUCCESS, KAFKA_TOPICS.PAYMENT_FAILED];
           await consumer.subscribe({
-               topics: [KAFKA_TOPICS.PAYMENT_SUCCESS, KAFKA_TOPICS.PAYMENT_FAILED],
+               topics: [...topics, ...topics.map((topic) => `${topic}.retry`)],
                fromBeginning: false,
           });
 
