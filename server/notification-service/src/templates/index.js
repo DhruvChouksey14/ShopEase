@@ -79,9 +79,9 @@ function getOrderFailedTemplate({ firstName, orderId, reason }) {
     `);
 }
 
-function getOrderCancelledTemplate({ firstName, orderId, reason, refundAmount }) {
+function getOrderCancelledTemplate({ firstName, orderId, reason, refundAmount, refundQueued }) {
      const friendlyReason = { user_cancelled: 'You cancelled this order' }[reason] || reason;
-     const refundLine = refundAmount > 0 ? `A refund of ₹${refundAmount.toFixed(2)} has been initiated and will reflect in 5-7 business days.` : 'No payment capture was refunded as none had completed.';
+     const refundLine = refundAmount > 0 ? `A refund of ₹${refundAmount.toFixed(2)} has been initiated and will reflect in 5-7 business days.` : refundQueued ? 'Your refund request is queued and will be retried automatically. We will send an update when it has been initiated.' : 'No payment capture was refunded as none had completed.';
      return shell('Order Cancelled', `
       <p style="font-size: 16px; color: #333;">Hi ${firstName ? `<strong>${firstName}</strong>` : 'there'},</p>
       <p style="font-size: 16px; color: #333;">Your order has been cancelled successfully.</p>
