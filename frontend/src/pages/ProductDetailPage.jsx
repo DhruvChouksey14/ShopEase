@@ -8,6 +8,8 @@ import { useToast } from '../components/ui/Toast';
 import { formatCurrency } from '../utils/format';
 import Button from '../components/ui/Button';
 import Spinner from '../components/ui/Spinner';
+import RecommendationSection from '../components/ai/RecommendationSection';
+import { aiApi } from '../api/ai.api';
 
 export default function ProductDetailPage() {
   const { productId } = useParams();
@@ -31,6 +33,8 @@ export default function ProductDetailPage() {
       .finally(() => setLoading(false));
   }, [productId]);
 
+  useEffect(() => { aiApi.trackEvent({ eventType: 'product_view', productId }); }, [productId]);
+
   const handleAddToCart = async () => {
     if (!isAuthenticated) {
       navigate(`/login?redirect=/products/${productId}`);
@@ -39,6 +43,7 @@ export default function ProductDetailPage() {
     setAdding(true);
     try {
       await addItem(productId, qty);
+      aiApi.trackEvent({ eventType: 'add_to_cart', productId });
       showToast('Added to cart', 'success');
     } catch (err) {
       showToast(err.message || 'Failed to add to cart', 'error');
@@ -53,6 +58,7 @@ export default function ProductDetailPage() {
   const outOfStock = stock && !stock.inStock;
 
   return (
+    <>
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 grid md:grid-cols-2 gap-10">
       <div className="aspect-square rounded-xl overflow-hidden bg-slate-100">
         <img
@@ -94,5 +100,10 @@ export default function ProductDetailPage() {
         </div>
       </div>
     </div>
+    <div className="md:col-span-2">
+      <RecommendationSection productId={productId} type="similar" title="Similar products" />
+      <RecommendationSection productId={productId} type="together" title="Frequently bought together" />
+    </div>
+    </>
   );
 }
