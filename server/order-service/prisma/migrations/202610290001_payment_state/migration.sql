@@ -1,0 +1,2 @@
+ALTER TABLE "orders" ADD COLUMN "paymentStatus" TEXT NOT NULL DEFAULT 'UNPAID';
+UPDATE "orders" SET "paymentStatus" = 'CAPTURED' WHERE "status" IN ('CONFIRMED', 'SHIPPED', 'DELIVERED');
