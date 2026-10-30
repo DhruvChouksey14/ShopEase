@@ -18,6 +18,8 @@ model Stock {
   updatedAt  DateTime @updatedAt
 
   reservations StockReservation[]
+  ledger StockLedger[]
+  ledgerAlerts StockLedgerAlert[]
 
   @@index([productId])
   @@map("stocks")
@@ -28,6 +30,7 @@ enum ReservationStatus {
   CONFIRMED
   RELEASED
   EXPIRED
+  RESTOCKED
 }
 
 // One row per (orderId, productId) reservation — lets us release/confirm the
@@ -49,6 +52,32 @@ model StockReservation {
   @@index([status, expiresAt])
   @@index([orderId])
   @@map("stock_reservations")
+}
+
+model StockLedger {
+  id        String   @id @default(uuid())
+  productId String
+  orderId   String?
+  delta     Int
+  reason    String
+  createdAt DateTime @default(now())
+  stock     Stock    @relation(fields: [productId], references: [productId])
+  @@index([productId, createdAt])
+  @@index([orderId])
+  @@map("stock_ledger")
+}
+
+model StockLedgerAlert {
+  id String @id @default(uuid())
+  productId String
+  expectedTotal Int
+  actualTotal Int
+  firstDetectedAt DateTime @default(now())
+  lastDetectedAt DateTime @updatedAt
+  resolvedAt DateTime?
+  stock Stock @relation(fields: [productId], references: [productId])
+  @@index([productId, resolvedAt])
+  @@map("stock_ledger_alerts")
 }
 
 model IdempotencyRecord {
