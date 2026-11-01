@@ -327,12 +327,6 @@ const verifyAndCapturePayment = async (paymentOrderId, gatewayPaymentId, gateway
           gatewaySignature
      );
 
-     if (isValid) {
-          const gatewayPayment = await gateway.fetchPayment(gatewayPaymentId);
-          if (gatewayPayment.status !== 'captured') return { paymentOrderId, status: 'AUTHORIZED_PENDING_CAPTURE', gatewayPaymentId };
-          if (gatewayPayment.amountPaise !== paymentOrder.amountPaise) throw new ConflictError('Gateway payment amount does not match payment order', 'PAYMENT_AMOUNT_MISMATCH');
-     }
-
      // Audit log the verification attempt
      await prisma.paymentAuditLog.create({
           data: {
@@ -361,6 +355,10 @@ const verifyAndCapturePayment = async (paymentOrderId, gatewayPaymentId, gateway
 
           throw new BadRequestError('Payment signature verification failed', 'INVALID_SIGNATURE');
      }
+
+     const gatewayPayment = await gateway.fetchPayment(gatewayPaymentId);
+     if (gatewayPayment.status !== 'captured') return { paymentOrderId, status: 'AUTHORIZED_PENDING_CAPTURE', gatewayPaymentId };
+     if (gatewayPayment.amountPaise !== paymentOrder.amountPaise) throw new ConflictError('Gateway payment amount does not match payment order', 'PAYMENT_AMOUNT_MISMATCH');
 
      // Signature valid — capture payment
      const successEvent = {
@@ -478,6 +476,7 @@ const getPaymentOrder = async (paymentOrderId) => {
      return {
           ...paymentOrder,
           amount: paymentOrder.amountPaise / 100,
+          keyId: config.RAZORPAY_KEY_ID,
           refunds: paymentOrder.refunds.map((refund) => ({ ...refund, amount: refund.amountPaise / 100 })),
      };
 };

@@ -50,10 +50,16 @@ class RazorpayGateway extends BaseGateway {
                .update(body)
                .digest('hex');
 
-          return crypto.timingSafeEqual(
-               Buffer.from(expectedSignature, 'hex'),
-               Buffer.from(signature, 'hex')
-          );
+          if (typeof signature !== 'string' || !/^[0-9a-f]+$/i.test(signature) || signature.length !== expectedSignature.length) return false;
+
+          try {
+               return crypto.timingSafeEqual(
+                    Buffer.from(expectedSignature, 'hex'),
+                    Buffer.from(signature, 'hex')
+               );
+          } catch {
+               return false;
+          }
      }
 
      verifyWebhookSignature(rawBody, signature) {
