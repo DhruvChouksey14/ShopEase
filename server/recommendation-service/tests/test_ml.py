@@ -138,7 +138,9 @@ def test_evaluation_popularity_baseline_is_not_all_zero():
     ])
     report = evaluate_dataset(interactions, k=2, test_fraction=0.4)
     assert report["models"]["popularity"]["ndcg_at_k"] >= 0
-    assert any(score > 0 for score in _popular(interactions.iloc[:3], ["a", "b", "c"], interactions["ts"].iloc[2]))
+    scores = _popular(interactions.iloc[:3], ["a", "b", "c"], interactions["ts"].iloc[2])
+    assert any(score > 0 for _, score in scores)
+    assert len({score for _, score in scores}) > 1
 
 
 def test_serving_popularity_is_identical_for_seconds_and_milliseconds():
