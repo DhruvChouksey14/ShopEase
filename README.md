@@ -445,12 +445,12 @@ The recorded Retailrocket offline evaluation uses a chronological split: the fir
 
 | Model | Precision@10 | Recall@10 | NDCG@10 | MAP@10 | Coverage |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Time-decayed popularity | 0.0007 | 0.0068 | 0.0043 | 0.0034 | 0.0022 |
+| Time-decayed popularity | 0.0088 | 0.0675 | 0.0407 | 0.0306 | 0.0026 |
 | All-time popularity | 0.0068 | 0.0588 | 0.0371 | 0.0288 | 0.0026 |
 | Item-item cosine | 0.0209 | 0.1686 | 0.1231 | 0.1068 | 0.1456 |
 | ALS | 0.0081 | 0.0715 | 0.0471 | 0.0378 | 0.0426 |
 | Content | 0.0223 | 0.1855 | 0.1052 | 0.0764 | 0.2172 |
-| Hybrid | 0.0230 | 0.1745 | 0.1250 | 0.1053 | 0.1874 |
+| Hybrid | 0.0209 | 0.1683 | 0.1211 | 0.1029 | 0.1520 |
 
 ```mermaid
 flowchart LR
