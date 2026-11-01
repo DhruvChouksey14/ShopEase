@@ -28,8 +28,8 @@ transactional systems applied to a shopping-cart-and-checkout domain.
 
 ## Overview
 
-ShopEase is a full e-commerce backend + frontend built as **10 independently deployable services**
-(9 Node.js microservices + a React SPA) communicating over HTTP, Kafka, and RabbitMQ. Every
+ShopEase is a full e-commerce backend + frontend built as **13 independently deployable components**
+(11 Node.js microservices, one Python FastAPI recommendation service, and a React SPA) communicating over HTTP, Kafka, and RabbitMQ. Every
 integration is real, not mocked: Google Sign-In, SendGrid transactional email, Razorpay payments
 with signature-verified webhooks, Elasticsearch-backed search, and Redis-based distributed locking.
 
@@ -224,6 +224,8 @@ sequenceDiagram
 EcommerceEngine/
 ├── server/
 │   ├── api-gateway/         Routing · JWT auth · rate limiting · circuit breaker
+│   ├── ai-service/          AI chat · recommendation facade · fallback logic
+│   ├── recommendation-service/ Python FastAPI ML recommendations · training · serving
 │   ├── user-service/        Auth (OTP + Google), JWT issuance, refresh rotation
 │   ├── catalog-service/     Products & categories — source of truth
 │   ├── inventory-service/   Stock, reservations, Redis distributed locks
@@ -327,7 +329,7 @@ Catalog, order, and payment migrations backfill integer paise columns, verify ea
 
 Kafka consumers retry through `<source-topic>.retry` topics with the attempt count in message headers. Production Kafka clusters should provision each retry topic with the source topic's partition count and retention policy before deploying the consumers.
 
-The order-service migration also creates the `order_outbox` table. Confirmation events are committed with the order status and delivered asynchronously. Delivery is at-least-once: the AI recommendation consumer deduplicates by order ID, while notification email delivery may repeat if the publisher crashes after Kafka accepts an event but before the outbox marks it delivered. Gateway circuit-breaker state is shared through Redis when Redis is available; on Redis failure it falls back to process-local state and emits an alert. If publishing a DLQ record fails after retries, the consumer leaves the source offset unresolved and logs an `ALERT` for monitoring.
+The order-service migration also creates the `order_outbox` table. Confirmation events are committed with the order status and delivered asynchronously. Delivery is at-least-once: the AI recommendation consumer deduplicates each order item by order ID and product ID, while notification email delivery may repeat if the publisher crashes after Kafka accepts an event but before the outbox marks it delivered. Gateway circuit-breaker state is shared through Redis when Redis is available; on Redis failure it falls back to process-local state and emits an alert. If publishing a DLQ record fails after retries, the consumer leaves the source offset unresolved and logs an `ALERT` for monitoring.
 
 ### 4. Start services
 ```bash
@@ -439,7 +441,7 @@ The gateway accepts `POST /api/ai/events` with at most 20 strict events. Event i
 
 ### Recommendation results
 
-The current Retailrocket offline evaluation uses a chronological split: the first 80% of timestamps trains the models, the next time window tunes hybrid weights, and the final held-out window is used for reported metrics and promotion decisions. Hybrid weights are selected only on validation data.
+The recorded Retailrocket offline evaluation uses a chronological split: the first 80% of timestamps trains the models, the next time window tunes hybrid weights, and the final held-out window is used for reported metrics and promotion decisions. Hybrid weights are selected only on validation data. Regenerate the report with the ML run order above when the dataset or training code changes.
 
 | Model | Precision@10 | Recall@10 | NDCG@10 | MAP@10 | Coverage |
 | --- | ---: | ---: | ---: | ---: | ---: |
