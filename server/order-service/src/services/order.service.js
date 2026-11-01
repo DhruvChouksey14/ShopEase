@@ -71,6 +71,25 @@ const saveIdempotency = async (key, response) => {
      await prisma.idempotencyRecord.create({ data: { eventKey: key, response } });
 };
 
+const buildOrderResponse = async (order) => {
+     const paymentOrder = await paymentClient.getPaymentStatus(order.paymentOrderId);
+     return {
+          orderId: order.id,
+          status: order.status,
+          totalAmount: order.totalAmountPaise / 100,
+          lockExpiresAt: order.lockExpiresAt,
+          items: order.items.map((i) => ({ productId: i.productId, name: i.name, price: i.pricePaise / 100, quantity: i.quantity, imageUrl: i.imageUrl })),
+          paymentOrder: {
+               paymentOrderId: paymentOrder.paymentOrderId,
+               gatewayOrderId: paymentOrder.gatewayOrderId,
+               amount: paymentOrder.amount,
+               amountPaise: paymentOrder.amountPaise,
+               currency: paymentOrder.currency,
+               keyId: paymentOrder.keyId,
+          },
+     };
+};
+
 // ─── Create Order (checkout) ──────────────────────────────────────────────────
 // Cart items only carry {productId, quantity} — price/name/sku/image are always
 // re-fetched from catalog-service at checkout time so a stale cart never locks
@@ -78,11 +97,12 @@ const saveIdempotency = async (key, response) => {
 
 const createOrder = async (userId, shippingAddress, idempotencyKey) => {
      if (!idempotencyKey) throw new BadRequestError('idempotencyKey is required');
-     if (!shippingAddress || !shippingAddress.line1 || !shippingAddress.city || !shippingAddress.postalCode) {
+     if (!shippingAddress || !shippingAddress.line1 || !shippingAddress.city || !shippingAddress.postalCode || !shippingAddress.country) {
           throw new BadRequestError('A complete shippingAddress (line1, city, postalCode, country) is required');
      }
 
-     const cached = await checkIdempotency(`order:${idempotencyKey}`);
+     const orderKey = `order:${userId}:${idempotencyKey}`;
+     const cached = await checkIdempotency(orderKey);
      if (cached) return cached;
 
      const cart = await cartClient.getCart(userId);
@@ -121,7 +141,7 @@ const createOrder = async (userId, shippingAddress, idempotencyKey) => {
                     userId,
                     status: 'PENDING',
                     totalAmountPaise,
-                    idempotencyKey,
+                    idempotencyKey: orderKey,
                     lockExpiresAt,
                     shippingAddress,
                     items: { create: orderItems },
@@ -136,7 +156,7 @@ const createOrder = async (userId, shippingAddress, idempotencyKey) => {
           await notifyStatus(order, 'STOCK_RESERVED');
 
           // Saga Step 2: create payment order (Razorpay)
-          const paymentOrder = await saga.executeCreatePayment(order);
+          await saga.executeCreatePayment(order);
           await notifyStatus(order, 'PAYMENT_PENDING');
 
           order = await prisma.order.findUnique({ where: { id: order.id }, include: { items: true } });
@@ -147,26 +167,24 @@ const createOrder = async (userId, shippingAddress, idempotencyKey) => {
                console.warn('Failed to clear cart after checkout', { userId, error: err.message })
           );
 
-          const response = {
-               orderId: order.id,
-               status: order.status,
-               totalAmount: order.totalAmountPaise / 100,
-               lockExpiresAt: order.lockExpiresAt,
-               items: order.items.map((i) => ({ productId: i.productId, name: i.name, price: i.pricePaise / 100, quantity: i.quantity, imageUrl: i.imageUrl })),
-               paymentOrder: {
-                    paymentOrderId: paymentOrder.paymentOrderId,
-                    gatewayOrderId: paymentOrder.gatewayOrderId,
-                    amount: paymentOrder.amount,
-                    amountPaise: paymentOrder.amountPaise,
-                    currency: paymentOrder.currency,
-                    keyId: paymentOrder.keyId,
-               },
-          };
+          const response = await buildOrderResponse(order);
 
-          await saveIdempotency(`order:${idempotencyKey}`, response);
+          await saveIdempotency(orderKey, response);
           return response;
      } catch (error) {
           console.error(`Order creation failed for user ${userId}`, { error: error.message });
+
+          if (error.code === 'P2002') {
+               const existingOrder = await prisma.order.findUnique({ where: { idempotencyKey: orderKey }, include: { items: true } });
+               if (existingOrder?.status === 'PAYMENT_PENDING') return buildOrderResponse(existingOrder);
+               if (existingOrder && ['FAILED', 'EXPIRED', 'CANCELLED'].includes(existingOrder.status)) {
+                    throw new ConflictError('This idempotency key has already been used. Retry with a new key.', 'IDEMPOTENCY_KEY_USED');
+               }
+               if (existingOrder) throw new ConflictError('An order is already being created with this idempotency key.', 'ORDER_IN_PROGRESS');
+
+               const existingResponse = await checkIdempotency(orderKey);
+               if (existingResponse) return existingResponse;
+          }
 
           if (order) {
                const stockItems = orderItems.map((i) => ({ productId: i.productId, quantity: i.quantity }));

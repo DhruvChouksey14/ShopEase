@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { useCartStore } from '../store/cart.store';
@@ -20,7 +20,7 @@ export default function CheckoutPage() {
 
   const [address, setAddress] = useState({ line1: '', line2: '', city: '', state: '', postalCode: '', country: 'India', phone: '' });
   const [placing, setPlacing] = useState(false);
-  const [idempotencyKey] = useState(() => uuidv4());
+  const idempotencyKeyRef = useRef(uuidv4());
 
   useEffect(() => { fetchCart(); }, [fetchCart]);
 
@@ -32,7 +32,7 @@ export default function CheckoutPage() {
     }
     setPlacing(true);
     try {
-      const res = await orderApi.createOrder(address, idempotencyKey);
+      const res = await orderApi.createOrder(address, idempotencyKeyRef.current);
       const { orderId, paymentOrder } = res.data;
 
       await loadRazorpayScript();
@@ -66,6 +66,7 @@ export default function CheckoutPage() {
         },
       });
     } catch (err) {
+      if (err.code !== 'ORDER_IN_PROGRESS') idempotencyKeyRef.current = uuidv4();
       showToast(err.message || 'Failed to place order', 'error');
     } finally {
       setPlacing(false);
@@ -92,7 +93,7 @@ export default function CheckoutPage() {
         </div>
         <Input label="Phone" value={address.phone} onChange={(e) => setAddress({ ...address, phone: e.target.value })} />
 
-        <Button type="submit" loading={placing} className="w-full mt-4">
+        <Button type="submit" loading={placing} disabled={placing} className="w-full mt-4">
           {placing ? 'Processing...' : `Pay ${formatCurrency(subtotal)} with Razorpay`}
         </Button>
         <p className="text-xs text-slate-400 text-center">Secure checkout — payment details never touch our servers.</p>
