@@ -48,6 +48,17 @@ test('chat rejects messages over the 1000 character limit before contacting the 
   expect(llm).not.toHaveBeenCalled();
 });
 
+test('chat returns a fallback when the overall deadline is exceeded', async () => {
+  jest.useFakeTimers();
+  const llm = jest.fn(() => new Promise(() => {}));
+  const pending = chat('u1', 'show me shoes', llm);
+  await jest.advanceTimersByTimeAsync(25001);
+  await expect(pending).resolves.toEqual({
+    reply: 'Sorry, I could not complete that request in time.', products: [], actions: [],
+  });
+  jest.useRealTimers();
+});
+
 test('popular recommendations use search fallback when event rankings are empty', async () => {
   http.request.mockResolvedValueOnce({ products: [{ productId: 'p2', name: 'Widget', price: 10, inStock: true }] })
     .mockResolvedValueOnce({ available: 4, inStock: true });
