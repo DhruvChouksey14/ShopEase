@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 import psycopg
-from aiokafka import AIOKafkaConsumer
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
 from .config import Settings
 
@@ -19,7 +19,7 @@ def interaction_rows(payload: dict, topic: str) -> list[dict]:
     if topic.endswith("user-events"):
         event_type = payload.get("eventType")
         product_id = payload.get("productId")
-        if event_type not in EVENT_WEIGHTS or not product_id:
+        if event_type not in EVENT_WEIGHTS or event_type == "purchase" or not product_id:
             return []
         return [{"event_id": payload.get("eventId") or str(uuid4()), "user_id": payload.get("userId"), "session_id": payload.get("sessionId"), "product_id": product_id, "event_type": event_type, "weight": EVENT_WEIGHTS[event_type], "ts": payload.get("ts") or datetime.now(timezone.utc).isoformat()}]
     if topic.endswith("order.confirmed"):
@@ -81,7 +81,9 @@ async def consume(settings: Settings, stop_event: asyncio.Event, retraining=None
     store = EventStore(settings.database_url, settings.redis_url)
     await asyncio.to_thread(store.initialize)
     consumer = AIOKafkaConsumer("recommendation.user-events", "order.confirmed", bootstrap_servers=settings.kafka_broker, group_id="recommendation-service-v1", enable_auto_commit=False)
+    producer = AIOKafkaProducer(bootstrap_servers=settings.kafka_broker)
     await consumer.start()
+    await producer.start()
     try:
         async for message in consumer:
             if stop_event.is_set():
@@ -92,7 +94,13 @@ async def consume(settings: Settings, stop_event: asyncio.Event, retraining=None
                 if retraining and retraining.record(len(rows)):
                     asyncio.create_task(retraining.train())
                 await consumer.commit()
-            except Exception:
+            except Exception as error:
                 LOGGER.exception("Recommendation event processing failed")
+                try:
+                    await producer.send_and_wait("recommendation.user-events.dlq", message.value)
+                    await consumer.commit()
+                except Exception:
+                    LOGGER.exception("Recommendation event DLQ publish failed")
     finally:
         await consumer.stop()
+        await producer.stop()
