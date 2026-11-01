@@ -5,6 +5,7 @@ RUN npm install --omit=dev --package-lock=false
 
 FROM node:22.14.0-alpine3.21 AS runtime
 ENV NODE_ENV=production
+ENV NODE_PATH=/app/node_modules
 WORKDIR /app
 COPY --from=deps --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node server/cart-service/ ./
