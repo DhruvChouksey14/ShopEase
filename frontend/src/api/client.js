@@ -1,6 +1,7 @@
 import axios from 'axios';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api';
+const NO_REFRESH_PATHS = ['/users/auth/login', '/users/auth/send-otp', '/users/auth/verify-otp', '/users/auth/google-auth', '/users/auth/refresh'];
 
 const client = axios.create({
   baseURL: API_BASE,
@@ -23,8 +24,9 @@ client.interceptors.response.use(
   (res) => res,
   async (error) => {
     const originalRequest = error.config;
+    const skipRefresh = NO_REFRESH_PATHS.some((path) => originalRequest?.url?.includes(path));
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    if (error.response?.status === 401 && !originalRequest._retry && !skipRefresh) {
       originalRequest._retry = true; // prevent this same request from re-entering the refresh flow if the retry also 401s
 
       if (isRefreshing) {
