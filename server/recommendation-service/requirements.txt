@@ -1,0 +1,14 @@
+fastapi==0.115.12
+uvicorn[standard]==0.34.0
+pydantic-settings==2.8.1
+prometheus-client==0.21.1
+pandas==2.2.3
+pytest==8.3.5
+httpx==0.28.1
+scikit-learn==1.6.1
+implicit==0.7.2
+joblib==1.4.2
+redis==5.2.1
+aiokafka==0.12.0
+psycopg[binary]==3.2.6
+apscheduler==3.11.0
