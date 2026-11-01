@@ -11,6 +11,7 @@ import joblib
 
 from .ml.ranker import rerank
 from .ml.hybrid import hybrid_rank
+from .ml.timeutil import to_seconds
 from .config import hybrid_weights
 
 
@@ -107,15 +108,14 @@ class RecommendationEngine:
         if category_id:
             allowed = {item for item, category in self._categories().items() if category == category_id}
             rows = rows[rows["product_id"].astype(str).isin(allowed)]
-        now = float(rows["ts"].max()) if "ts" in rows else time.time()
         timestamps = rows.get("ts")
         if timestamps is None:
             decay = 1.0
             rows["score"] = rows.get("weight", 1.0)
         else:
-            values = timestamps.astype(float)
-            unit = 1000.0 if values.max() > 10_000_000_000 else 1.0
-            decay = (0.5 ** (((now - values / unit).clip(lower=0)) / (14 * 86400)))
+            values = to_seconds(timestamps.astype(float))
+            now = float(values.max()) if values.notna().any() else time.time()
+            decay = 0.5 ** (((now - values).clip(lower=0)) / (14 * 86400))
             rows["score"] = rows.get("weight", 1.0).astype(float) * decay
         scores = rows.assign(product_id=rows["product_id"].astype(str)).groupby("product_id")["score"].sum()
         return [(item, float(score)) for item, score in scores.sort_values(ascending=False).head(limit).items()]

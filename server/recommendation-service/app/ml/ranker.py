@@ -4,6 +4,10 @@ import math
 import time
 from collections import defaultdict
 
+import pandas as pd
+
+from .timeutil import to_seconds
+
 
 def rerank(candidates, purchased=None, category_by_id=None, in_stock=None, limit=10, diversity=0.25):
     purchased = {str(value) for value in (purchased or set())}
@@ -32,5 +36,7 @@ def rerank(candidates, purchased=None, category_by_id=None, in_stock=None, limit
 def time_decay(timestamp, now=None, half_life_days=14.0):
     if timestamp is None:
         return 0.0
-    age_seconds = max(0.0, (now or time.time()) - float(timestamp))
+    timestamp_seconds = float(to_seconds(pd.Series([timestamp])).iloc[0])
+    now_seconds = float(to_seconds(pd.Series([now if now is not None else time.time()])).iloc[0])
+    age_seconds = max(0.0, now_seconds - timestamp_seconds)
     return math.pow(0.5, age_seconds / (half_life_days * 86400))

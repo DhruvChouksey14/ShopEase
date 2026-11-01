@@ -12,7 +12,8 @@ from app.ml.train import merge_interactions, promotion_allowed
 import app.ml.train as train_module
 from app.ml.collaborative import CollaborativeModel
 from app.ml.matrix import build_interaction_matrix
-from app.ml.ranker import rerank
+from app.ml.ranker import rerank, time_decay
+from app.ml.evaluate import _popular
 
 
 def products():
@@ -100,6 +101,61 @@ def test_live_merge_adds_rows_and_applies_recency_weighting():
     merged = merge_interactions(dataset, live, "hybrid")
     assert set(merged["product_id"]) == {"a", "b"}
     assert merged.loc[merged["product_id"] == "b", "weight"].iloc[0] == 4
+
+
+def test_merge_normalizes_millisecond_dataset_and_live_seconds():
+    dataset = pd.DataFrame([{"user_id": "u1", "product_id": "old", "weight": 1, "ts": 1_700_000_000_000}])
+    live = pd.DataFrame([{"user_id": "u2", "session_id": None, "product_id": "new", "weight": 2, "ts": "2023-11-14T22:13:21Z"}])
+    merged = merge_interactions(dataset, live, "hybrid")
+    assert merged["ts"].max() < 2_000_000_000
+    assert merged.sort_values("ts")["product_id"].tolist() == ["old", "new"]
+
+
+def test_time_decay_and_popularity_are_nonzero_and_unit_invariant():
+    seconds = 1_700_000_000.0
+    rows = pd.DataFrame([
+        {"product_id": "old", "weight": 1, "ts": seconds - 5 * 86400},
+        {"product_id": "new", "weight": 1, "ts": seconds},
+    ])
+    milliseconds = rows.assign(ts=rows["ts"] * 1000)
+    second_scores = dict(_popular(rows, ["old", "new"], seconds))
+    millisecond_scores = dict(_popular(milliseconds, ["old", "new"], seconds * 1000))
+    assert millisecond_scores == pytest.approx(second_scores)
+    assert millisecond_scores["new"] > 0.99
+    assert millisecond_scores["old"] < millisecond_scores["new"]
+    assert 0 < millisecond_scores["old"] < 1
+    assert millisecond_scores["new"] == pytest.approx(1.0)
+    assert time_decay(seconds * 1000, seconds * 1000) == pytest.approx(time_decay(seconds, seconds))
+
+
+def test_evaluation_popularity_baseline_is_not_all_zero():
+    interactions = pd.DataFrame([
+        {"user_id": "u1", "product_id": "a", "weight": 1, "ts": 1_700_000_000_000},
+        {"user_id": "u1", "product_id": "b", "weight": 1, "ts": 1_700_000_100_000},
+        {"user_id": "u2", "product_id": "a", "weight": 1, "ts": 1_700_000_200_000},
+        {"user_id": "u2", "product_id": "c", "weight": 1, "ts": 1_700_000_300_000},
+        {"user_id": "u3", "product_id": "b", "weight": 1, "ts": 1_700_000_400_000},
+    ])
+    report = evaluate_dataset(interactions, k=2, test_fraction=0.4)
+    assert report["models"]["popularity"]["ndcg_at_k"] >= 0
+    assert any(score > 0 for score in _popular(interactions.iloc[:3], ["a", "b", "c"], interactions["ts"].iloc[2]))
+
+
+def test_serving_popularity_is_identical_for_seconds_and_milliseconds():
+    from types import SimpleNamespace
+    from app.serving import RecommendationEngine
+
+    seconds = 1_700_000_000.0
+    rows = pd.DataFrame([
+        {"product_id": "old", "weight": 1, "ts": seconds - 5 * 86400},
+        {"product_id": "new", "weight": 1, "ts": seconds},
+    ])
+    engine = RecommendationEngine("/unused")
+    engine.bundle = SimpleNamespace(interactions=rows, products=None)
+    seconds_scores = dict(engine._popular_candidates(10))
+    engine.bundle.interactions = rows.assign(ts=rows["ts"] * 1000)
+    milliseconds_scores = dict(engine._popular_candidates(10))
+    assert milliseconds_scores == pytest.approx(seconds_scores)
 
 
 def test_main_forwards_hybrid_options_and_live_rows(monkeypatch, tmp_path, capsys):

@@ -13,6 +13,7 @@ from .collaborative import CollaborativeModel
 from .content import ContentModel
 from .hybrid import hybrid_rank, weight_grid
 from .matrix import build_interaction_matrix
+from .timeutil import to_seconds
 
 MODEL_NAMES = ("popularity", "popularity_plain", "item_item", "als", "content", "hybrid")
 
@@ -23,7 +24,7 @@ def _timestamp_column(rows: pd.DataFrame) -> pd.Series:
     values = pd.to_numeric(rows["ts"], errors="coerce")
     if values.isna().all():
         values = pd.to_datetime(rows["ts"], errors="coerce").astype("int64") / 1e9
-    return values.ffill().fillna(0.0).astype(float)
+    return to_seconds(values.ffill().fillna(0.0).astype(float))
 
 
 def _metrics(actual: set[str], predicted: list[str], k: int) -> dict[str, float]:
@@ -51,9 +52,9 @@ def _products_from_items(items: pd.DataFrame | None, item_ids: list[str]) -> pd.
 
 
 def _popular(train: pd.DataFrame, item_ids: list[str], now: float, half_life_days: float = 14.0) -> list[tuple[str, float]]:
-    timestamps = pd.to_numeric(train["ts"], errors="coerce")
-    unit = 1000.0 if timestamps.max() > 10_000_000_000 else 1.0
-    age = ((now - timestamps / unit).clip(lower=0) / (half_life_days * 86400)).fillna(0)
+    timestamps = to_seconds(train["ts"])
+    now_seconds = float(to_seconds(pd.Series([now])).iloc[0])
+    age = ((now_seconds - timestamps).clip(lower=0) / (half_life_days * 86400)).fillna(0)
     scores = train.assign(score=train["weight"].astype(float) * np.power(0.5, age)).groupby("product_id")["score"].sum()
     return [(str(item), float(scores[item])) for item in scores.sort_values(ascending=False).index if item in item_ids]
 
@@ -117,7 +118,7 @@ def evaluate_dataset(interactions: pd.DataFrame, items: pd.DataFrame | None = No
         rows["weight"] = 1.0
     if "ts" not in rows:
         rows["ts"] = np.arange(len(rows), dtype=float)
-    rows["ts"] = pd.to_numeric(rows["ts"], errors="coerce").ffill().fillna(0.0)
+    rows["ts"] = _timestamp_column(rows)
     rows = rows.sort_values("ts").reset_index(drop=True)
     split_date = rows["ts"].quantile(1 - test_fraction) if len(rows) > 1 else None
     train = rows[rows["ts"] < split_date].copy() if split_date is not None else rows.copy()

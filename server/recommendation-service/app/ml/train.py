@@ -14,6 +14,7 @@ from .collaborative import CollaborativeModel
 from .content import ContentModel
 from .evaluate import evaluate_dataset
 from .matrix import build_interaction_matrix
+from .timeutil import to_seconds
 
 
 class Bundle:
@@ -47,18 +48,20 @@ def load_live_interactions(database_url: str) -> pd.DataFrame:
 
 def merge_interactions(dataset: pd.DataFrame, live: pd.DataFrame, source: str, half_life_days: float = 14.0) -> pd.DataFrame:
     if source == "dataset":
+        dataset = dataset.copy()
+        dataset["ts"] = to_seconds(dataset["ts"])
         return dataset
     live = live.copy()
     live["user_id"] = live["user_id"].fillna("session:" + live["session_id"].fillna("unknown")).astype(str)
     live["product_id"] = live["product_id"].astype(str)
-    live["ts"] = pd.to_datetime(live["ts"], utc=True).astype("int64") / 1e9
+    live["ts"] = to_seconds(live["ts"])
     now = float(live["ts"].max()) if not live.empty else 0.0
     if now and half_life_days > 0:
         live["weight"] = live["weight"].astype(float) * (0.5 ** ((now - live["ts"]).clip(lower=0) / (half_life_days * 86400)))
     if source == "live":
         return live[["user_id", "product_id", "weight", "ts"]]
     dataset = dataset.copy()
-    dataset["ts"] = pd.to_numeric(dataset["ts"], errors="coerce")
+    dataset["ts"] = to_seconds(dataset["ts"])
     return pd.concat([dataset[["user_id", "product_id", "weight", "ts"]], live[["user_id", "product_id", "weight", "ts"]]], ignore_index=True)
 
 
