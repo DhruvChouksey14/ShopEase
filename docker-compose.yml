@@ -1,3 +1,4 @@
+# Local development only. Elasticsearch security is disabled in this compose file.
 name: shopease-backend
 
 services:
@@ -10,7 +11,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: postgres
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -23,7 +24,7 @@ services:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@example.com}
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:?Set PGADMIN_DEFAULT_PASSWORD in .env}
     ports:
-      - "8081:80"
+      - "127.0.0.1:8081:80"
     depends_on:
       - postgres
     networks:
@@ -36,8 +37,8 @@ services:
     environment:
       REDIS_ARGS: "--requirepass ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}"
     ports:
-      - "6379:6379"
-      - "8001:8001"
+      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:8001:8001"
     volumes:
       - redis_data:/data
     networks:
@@ -51,7 +52,7 @@ services:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
     ports:
-      - "2181:2181"
+      - "127.0.0.1:2181:2181"
     volumes:
       - zookeeper_data:/var/lib/zookeeper/data
       - zookeeper_logs:/var/lib/zookeeper/log
@@ -65,8 +66,8 @@ services:
     depends_on:
       - zookeeper
     ports:
-      - "9092:9092"
-      - "9093:9093"
+      - "127.0.0.1:9092:9092"
+      - "127.0.0.1:9093:9093"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
@@ -89,7 +90,7 @@ services:
     depends_on:
       - kafka
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: shopease-cluster
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
@@ -106,8 +107,8 @@ services:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-shopease}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?Set RABBITMQ_DEFAULT_PASS in .env}
     ports:
-      - "5672:5672"   # AMQP
-      - "15672:15672" # Management UI — credentials come from root .env
+      - "127.0.0.1:5672:5672"   # AMQP
+      - "127.0.0.1:15672:15672" # Management UI — credentials come from root .env
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     networks:
@@ -134,7 +135,7 @@ services:
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-20b}
     ports:
-      - "4009:4009"
+      - "127.0.0.1:4009:4009"
     depends_on:
       - redis
       - kafka
@@ -154,13 +155,13 @@ services:
       KAFKA_BROKER: kafka:9092
       DATA_SOURCE: ${RECOMMENDATION_DATA_SOURCE:-dataset}
       MODEL_DIR: /models
-      DATABASE_URL: ${RECOMMENDATION_DATABASE_URL:-postgresql://admin:${POSTGRES_PASSWORD}@postgres:5432/postgres}
+      DATABASE_URL: ${RECOMMENDATION_DATABASE_URL:-postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD}@postgres:5432/postgres}
       ENABLE_CONSUMER: "true"
       ENABLE_RETRAINING: ${RECOMMENDATION_ENABLE_RETRAINING:-false}
       DATA_DIR: /data
       RETRAIN_AFTER_INTERACTIONS: ${RECOMMENDATION_RETRAIN_AFTER_INTERACTIONS:-1000}
     ports:
-      - "4010:4010"
+      - "127.0.0.1:4010:4010"
     depends_on:
       - redis
       - kafka
@@ -180,7 +181,7 @@ services:
       - xpack.security.enabled=false
       - ES_JAVA_OPTS=-Xms512m -Xmx512m
     ports:
-      - "9200:9200"
+      - "127.0.0.1:9200:9200"
     volumes:
       - es_data:/usr/share/elasticsearch/data
     networks:
@@ -193,7 +194,7 @@ services:
     depends_on:
       - elasticsearch
     ports:
-      - "5601:5601"
+      - "127.0.0.1:5601:5601"
     environment:
       ELASTICSEARCH_HOSTS: http://elasticsearch:9200
     networks:
@@ -210,7 +211,7 @@ services:
       - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
     ports:
-      - "9090:9090" # http://localhost:9090
+      - "127.0.0.1:9090:9090" # http://localhost:9090
     networks:
       - shopease-network
 
@@ -226,7 +227,7 @@ services:
     volumes:
       - grafana_data:/var/lib/grafana
     ports:
-      - "3001:3000" # http://localhost:3001 — add Prometheus (http://prometheus:9090) as a data source
+      - "127.0.0.1:3001:3000" # http://localhost:3001 — add Prometheus (http://prometheus:9090) as a data source
     networks:
       - shopease-network
 

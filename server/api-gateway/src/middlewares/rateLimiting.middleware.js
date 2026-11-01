@@ -24,7 +24,8 @@ async function rateLimiter(key, maxRequests, windowMs, failClosed = false) {
           pipeline.zremrangebyscore(key, 0, windowStart);
 
           // Add current request
-          pipeline.zadd(key, now, `${now}-${Math.random()}`);
+          const member = `${now}-${Math.random()}`;
+          pipeline.zadd(key, now, member);
 
           // Count requests in current window
           pipeline.zcard(key);
@@ -38,6 +39,7 @@ async function rateLimiter(key, maxRequests, windowMs, failClosed = false) {
           const requestCount = results[2][1];
 
           if (requestCount > maxRequests) {
+               await redis.zrem(key, member);
                const oldestRequest = await redis.zrange(key, 0, 0, 'WITHSCORES');
                const resetTime = parseInt(oldestRequest[1]) + windowMs;
                const retryAfter = Math.ceil((resetTime - now) / 1000);

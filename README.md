@@ -299,6 +299,8 @@ docker compose ps
 
 The example credentials are for local development only. Compose reads passwords from the root `.env` file.
 
+When the API gateway runs behind a trusted reverse proxy, set `TRUST_PROXY_HOPS` to the number of proxy hops. Keep it at `0` for direct local development; only increase it when every configured hop is trusted.
+
 ### 2. Configure environment
 ```bash
 for service in api-gateway user-service search-service catalog-service \

@@ -28,4 +28,8 @@ const config = {
      RABBITMQ_URL: process.env.RABBITMQ_URL || 'amqp://localhost:5672',
 }
 
+if (config.NODE_ENV === 'production' && !config.ALLOWED_ORIGINS) {
+     throw new Error('Missing required environment variable: ALLOWED_ORIGINS');
+}
+
 module.exports = { config };

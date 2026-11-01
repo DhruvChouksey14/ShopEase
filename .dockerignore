@@ -4,3 +4,7 @@
 **/.git
 **/coverage
 **/.DS_Store
+data/
+server/recommendation-service/models/
+.pytest_cache/
+**/.pytest_cache/

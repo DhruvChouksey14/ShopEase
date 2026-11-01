@@ -8,9 +8,6 @@
 .env.test
 .env.production
 *.env
-*.env.example
-
-# Environment example files are also ignored by request.
 
 # ============ Local Documentation ============
 LOCAL_SETUP.md
@@ -91,6 +88,8 @@ data/
 server/recommendation-service/models/
 server/recommendation-service/.venv/
 server/recommendation-service/reports/
+.pytest_cache/
+**/.pytest_cache/
 .directory
 
 # ============ Testing ============
