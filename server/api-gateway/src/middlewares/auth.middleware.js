@@ -42,8 +42,6 @@ function requireAuth(req, res, next) {
           req.headers['x-user-id'] = payload.id.toString();
           req.headers['x-user-role'] = req.user.role;
 
-          console.log(`User ${payload.id} authenticated successfully`);
-
           next();
      } catch (err) {
           if (err.name === 'TokenExpiredError') {
@@ -56,6 +54,34 @@ function requireAuth(req, res, next) {
      }
 }
 
+function optionalAuth(req, res, next) {
+     try {
+          let accessToken;
+          const authHeader = req.headers.authorization;
+          if (authHeader && authHeader.startsWith('Bearer ')) {
+               accessToken = authHeader.split(' ')[1];
+          }
+          if (!accessToken && req.cookies) {
+               accessToken = req.cookies.accessToken;
+          }
+          if (!accessToken) return next();
+
+          const payload = jwt.verify(accessToken, config.JWT_ACCESS_SECRET);
+          if (!payload.id) return next();
+
+          req.user = {
+               id: payload.id,
+               role: payload.role || 'USER',
+          };
+          req.headers['x-user-id'] = payload.id.toString();
+          req.headers['x-user-role'] = req.user.role;
+     } catch (_) {
+          return next();
+     }
+
+     next();
+}
+
 function requireAdmin(req, res, next) {
      if (req.user?.role !== 'ADMIN') {
           return next(new ForbiddenError('Administrator access is required', 'ADMIN_REQUIRED'));
@@ -64,4 +90,4 @@ function requireAdmin(req, res, next) {
      next();
 }
 
-module.exports = { requireAuth, requireAdmin };
+module.exports = { requireAuth, optionalAuth, requireAdmin };

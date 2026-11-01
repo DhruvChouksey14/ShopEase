@@ -26,7 +26,7 @@ function extractToken(socket) {
 
 function initSocketServer(httpServer) {
      io = new Server(httpServer, {
-          cors: { origin: config.ALLOWED_ORIGINS?.split(',') || '*', credentials: true },
+          cors: { origin: config.ALLOWED_ORIGINS ? config.ALLOWED_ORIGINS.split(',').map((origin) => origin.trim()) : [], credentials: true },
           path: '/socket.io',
      });
 

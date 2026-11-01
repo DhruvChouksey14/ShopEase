@@ -1,5 +1,7 @@
+const { timingSafeEqual } = require('../../../../shared/utils/timingSafeEqual');
+
 function internalAuth(req, res, next) {
-     if (!process.env.INTERNAL_SERVICE_KEY || req.get('x-internal-service-key') !== process.env.INTERNAL_SERVICE_KEY) {
+     if (!timingSafeEqual(req.get('x-internal-service-key'), process.env.INTERNAL_SERVICE_KEY)) {
           return res.status(403).json({ success: false, message: 'Gateway authentication required' });
      }
      next();

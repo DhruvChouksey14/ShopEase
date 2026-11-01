@@ -1,5 +1,5 @@
 const express = require('express');
-const { requireAuth, requireAdmin } = require('../middlewares/auth.middleware');
+const { requireAuth, optionalAuth, requireAdmin } = require('../middlewares/auth.middleware');
 const { createProxy, getCircuitBreakerStatus } = require('../services/proxy');
 const { endpointRateLimit, combinedRateLimit, userRateLimit } = require('../middlewares/rateLimiting.middleware');
 const { config } = require('../config');
@@ -75,9 +75,9 @@ const aiServiceProxy = createProxy('aiService', config.SERVICES.AI_SERVICE_URL);
 router.post('/ai/chat', requireAuth, userRateLimit({ max: 20, windowMs: 60000 }), aiServiceProxy);
 router.get('/ai/recommendations/product/:productId', endpointRateLimit(60, 60000), aiServiceProxy);
 router.get('/ai/recommendations/popular', endpointRateLimit(60, 60000), aiServiceProxy);
-router.get('/ai/recommendations/user', endpointRateLimit(60, 60000), aiServiceProxy);
-router.get('/ai/recommendations/cart', endpointRateLimit(60, 60000), aiServiceProxy);
-router.post('/ai/events', endpointRateLimit(30, 60000), aiServiceProxy);
+router.get('/ai/recommendations/user', optionalAuth, endpointRateLimit(60, 60000), aiServiceProxy);
+router.get('/ai/recommendations/cart', optionalAuth, endpointRateLimit(60, 60000), aiServiceProxy);
+router.post('/ai/events', optionalAuth, endpointRateLimit(30, 60000), aiServiceProxy);
 
 // ===========================
 // ORDER SERVICE ROUTES (checkout saga, cancellation, history)

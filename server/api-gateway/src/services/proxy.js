@@ -4,6 +4,18 @@ const { config } = require('../config');
 const { ServiceUnavailableError, GatewayTimeoutError } = require('../utils/error');
 const { redis } = require('../config/redis');
 
+const FORWARDED_HEADERS = [
+     'content-type',
+     'accept',
+     'cookie',
+     'authorization',
+     'x-request-id',
+     'x-user-id',
+     'x-user-role',
+     'x-razorpay-signature',
+     'user-agent',
+];
+
 const ACQUIRE_BREAKER_SCRIPT = `
 local state = redis.call('HGET', KEYS[1], 'state') or 'CLOSED'
 if state == 'OPEN' then
@@ -186,22 +198,22 @@ const circuitBreakers = {
  */
 async function forwardRequest(serviceUrl, path, method, data, headers, circuitBreaker, route, requestId) {
      const url = `${serviceUrl}${path}`;
+     const forwardedHeaders = Object.fromEntries(
+          FORWARDED_HEADERS
+               .filter((header) => headers[header] !== undefined)
+               .map((header) => [header, headers[header]])
+     );
      // http://localhost:4001/auth/login
      const requestConfig = {
           method,
           url,
           timeout: config.SERVICE_TIMEOUT_MS,
           headers: {
-               ...headers,
+               ...forwardedHeaders,
                'x-internal-service-key': config.INTERNAL_SERVICE_KEY,
-               // Remove host header to avoid conflicts
-               host: undefined,
-               // Remove content-length to let axios recalculate
-               'content-length': undefined,
           },
           validateStatus: (status) => status < 500,
-          // Set max redirects
-          maxRedirects: 5,
+          maxRedirects: 0,
      };
 
      // Add data based on method

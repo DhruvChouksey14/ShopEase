@@ -10,6 +10,7 @@ const { createMetrics } = require('../../../shared/middlewares/metrics');
 const app = express();
 const { metricsMiddleware, metricsHandler } = createMetrics('api-gateway');
 
+app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS ?? 0));
 app.use(corsMiddleware);
 app.use(metricsMiddleware);
 app.use(helmet({
@@ -25,6 +26,12 @@ app.use((req, res, next) => {
 });
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
+app.use((req, res, next) => {
+     delete req.headers['x-user-id'];
+     delete req.headers['x-user-role'];
+     delete req.headers['x-internal-service-key'];
+     next();
+});
 
 if (config.NODE_ENV === 'development') {
      app.use(morgan('dev'));
@@ -42,9 +49,11 @@ app.get('/health', (req, res) => {
 app.get('/metrics', metricsHandler);
 
 app.use('/api', routes);
+let server;
+
 const gracefulShutdown = () => {
      console.log('Received shutdown signal, closing server gracefully...');
-     server.close(() => {
+     server?.close(() => {
           console.log('Server closed');
           process.exit(0);
      });
@@ -55,16 +64,18 @@ const gracefulShutdown = () => {
      }, 30000);
 };
 
-process.on('SIGTERM', gracefulShutdown);
-process.on('SIGINT', gracefulShutdown);
+if (require.main === module) {
+     process.on('SIGTERM', gracefulShutdown);
+     process.on('SIGINT', gracefulShutdown);
 
-const server = app.listen(config.PORT, () => {
-     console.log(`🚀 API Gateway running on port ${config.PORT} in ${config.NODE_ENV} mode`);
-});
+     server = app.listen(config.PORT, () => {
+          console.log(`🚀 API Gateway running on port ${config.PORT} in ${config.NODE_ENV} mode`);
+     });
 
-process.on('unhandledRejection', (err) => {
-     console.error('Unhandled Rejection:', err);
-     server.close(() => process.exit(1));
-});
+     process.on('unhandledRejection', (err) => {
+          console.error('Unhandled Rejection:', err);
+          server?.close(() => process.exit(1));
+     });
+}
 
 module.exports = app;
