@@ -8,7 +8,7 @@ jest.mock('../src/config/redis', () => ({ redis: {
 jest.mock('../src/services/http', () => ({ request: jest.fn() }));
 
 const { chat } = require('../src/services/chat.service');
-const { validateSearchArgs, validateAddArgs, addProductToCart, popularProducts } = require('../src/services/tools');
+const { validateSearchArgs, validateAddArgs, searchProducts, addProductToCart, popularProducts } = require('../src/services/tools');
 const { redis } = require('../src/config/redis');
 const http = require('../src/services/http');
 
@@ -32,6 +32,15 @@ test('tool argument validators strip extra fields and enforce bounds', () => {
   expect(validateAddArgs({ productId: 'p1', quantity: 2, userId: 'attacker' })).toEqual({ productId: 'p1', quantity: 2 });
   expect(() => validateAddArgs({ productId: 'p1', quantity: 11 })).toThrow();
   expect(() => validateSearchArgs({ query: 'x'.repeat(161) })).toThrow();
+});
+
+test('searchProducts accepts a query when phrases are absent', async () => {
+  http.request.mockResolvedValueOnce({ products: [{ productId: 'shoe-1', name: 'Running shoes', price: 42, inStock: true }] })
+    .mockResolvedValueOnce({ available: 3, inStock: true });
+
+  await expect(searchProducts({ query: 'running shoes' })).resolves.toEqual([
+    expect.objectContaining({ productId: 'shoe-1', name: 'Running shoes' }),
+  ]);
 });
 
 test('add-to-cart rejects inactive products and products without enough stock', async () => {

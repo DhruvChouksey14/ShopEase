@@ -55,7 +55,8 @@ function normalizeProduct(product, stock) {
 }
 async function searchProducts(raw) {
      const args = validateSearchArgs(raw);
-     const queries = args.phrases.length ? args.phrases : [args.query];
+     if (!args.phrases?.length && !args.query) throw new Error('Provide a query or phrases');
+     const queries = args.phrases?.length ? args.phrases : [args.query];
      const found = new Map();
      for (const q of queries.filter(Boolean).slice(0, 4)) {
           const result = await request('search', `/products?q=${encodeURIComponent(q)}&inStockOnly=true&limit=10`);
