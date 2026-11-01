@@ -33,6 +33,9 @@ const KAFKA_TOPICS = {
      DLQ_INVENTORY: 'dlq.inventory-service',
      DLQ_SEARCH: 'dlq.search-service',
      DLQ_NOTIFICATION: 'dlq.notification-service',
+     DLQ_AI: 'dlq.ai-service',
+     USER_EVENTS: 'recommendation.user-events',
+     DLQ_RECOMMENDATION: 'dlq.recommendation-service',
 };
 
 /**
