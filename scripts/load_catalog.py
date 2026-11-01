@@ -73,7 +73,7 @@ def load_catalog(data_dir: Path, catalog_url: str, inventory_url: str, key: str,
             category_ids[category_name.lower()] = category_id
         fields = deterministic_fields(item_id, category_name, min_price_paise, max_price_paise)
         product = request_json("POST", f"{catalog_url}/products", key, admin_user_id, json={
-            "sku": sku, "name": fields["name"], "description": fields["description"], "brand": fields["brand"],
+            "id": item_id, "sku": sku, "name": fields["name"], "description": fields["description"], "brand": fields["brand"],
             "categoryId": category_id, "price": fields["price_paise"] / 100, "images": [fields["image_url"]],
             "attributes": row.get("properties", {}) if isinstance(row.get("properties"), dict) else {}, "initialStock": 0,
         })

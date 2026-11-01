@@ -35,7 +35,15 @@ class RecommendationEngine:
         target = str(current.resolve()) if current.exists() else None
         if target == self.loaded_target:
             return
-        self.bundle = joblib.load(model_path) if model_path.exists() else None
+        if model_path.exists():
+            import __main__
+            from .ml.bundle import Bundle
+
+            if not hasattr(__main__, "Bundle"):
+                setattr(__main__, "Bundle", Bundle)
+            self.bundle = joblib.load(model_path)
+        else:
+            self.bundle = None
         self.loaded_target = target
 
     def user(self, user_id: str | None, session_id: str | None, limit: int = 10) -> list[dict[str, Any]]:

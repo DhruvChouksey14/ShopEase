@@ -6,10 +6,16 @@ const toPaise = (rupees) => Math.round(Number(rupees) * 100);
 const presentProduct = (product) => product && ({ ...product, price: product.pricePaise / 100, compareAtPrice: product.compareAtPricePaise == null ? null : product.compareAtPricePaise / 100 });
 
 const createProduct = async (data) => {
-     const { sku, name, description, price, compareAtPrice, images, categoryId, brand, attributes, initialStock } = data;
+     const { id, sku, name, description, price, compareAtPrice, images, categoryId, brand, attributes, initialStock } = data;
 
      if (!sku || !name || price === undefined || !categoryId) {
           throw new BadRequestError('sku, name, price, and categoryId are required');
+     }
+
+     if (id !== undefined) {
+          if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(id)) throw new BadRequestError('Invalid product id');
+          const existingId = await prisma.product.findUnique({ where: { id } });
+          if (existingId) throw new ConflictError('A product with this id already exists');
      }
 
      const category = await prisma.category.findUnique({ where: { id: categoryId } });
@@ -24,6 +30,7 @@ const createProduct = async (data) => {
 
      const product = await prisma.product.create({
           data: {
+               ...(id !== undefined ? { id } : {}),
                sku,
                name,
                slug,

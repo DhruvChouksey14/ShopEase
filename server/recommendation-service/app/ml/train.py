@@ -10,25 +10,12 @@ import pandas as pd
 import psycopg
 
 from .artifacts import save_versioned_artifact
+from .bundle import Bundle
 from .collaborative import CollaborativeModel
 from .content import ContentModel
 from .evaluate import evaluate_dataset
 from .matrix import build_interaction_matrix
 from .timeutil import to_seconds
-
-
-class Bundle:
-    def __init__(self, collaborative, content, interactions=None, products=None, hybrid_weights=None):
-        self.collaborative = collaborative
-        self.content = content
-        self.interactions = interactions
-        self.products = products
-        self.hybrid_weights = hybrid_weights
-
-    def save(self, path):
-        import joblib
-
-        joblib.dump(self, path)
 
 
 def promotion_allowed(report: dict, margin: float | None = None) -> bool:
