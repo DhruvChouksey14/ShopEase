@@ -44,10 +44,14 @@ def _products_from_items(items: pd.DataFrame | None, item_ids: list[str]) -> pd.
         return pd.DataFrame({"product_id": item_ids, "name": names, "description": names, "brand": "", "category": "", "attributes": ""})
     products = items.copy().rename(columns={"item_id": "product_id"})
     products["product_id"] = products["product_id"].astype(str)
-    products["name"] = "Retailrocket product " + products["product_id"]
-    products["description"] = products.get("tokens", "")
-    products["brand"] = "Retailrocket Dataset"
-    products["category"] = products.get("category_path", "uncategorized")
+    if "name" not in products:
+        products["name"] = "H&M fashion item " + products["product_id"]
+    if "description" not in products:
+        products["description"] = products.get("tokens", "")
+    if "brand" not in products:
+        products["brand"] = "H&M"
+    if "category" not in products:
+        products["category"] = products.get("category_path", "Fashion")
     return products[products["product_id"].isin(item_ids)].copy()
 
 
@@ -110,7 +114,7 @@ def _score_predictions(predictions: dict[str, dict[str, list[str]]], relevant: d
     return metrics
 
 
-def evaluate_dataset(interactions: pd.DataFrame, items: pd.DataFrame | None = None, k: int = 10, test_fraction: float = 0.2, dataset_name: str = "Retailrocket") -> dict:
+def evaluate_dataset(interactions: pd.DataFrame, items: pd.DataFrame | None = None, k: int = 10, test_fraction: float = 0.2, dataset_name: str = "H&M") -> dict:
     rows = interactions.copy()
     rows["user_id"] = rows["user_id"].astype(str)
     rows["product_id"] = rows["product_id"].astype(str)

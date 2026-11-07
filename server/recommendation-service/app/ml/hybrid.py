@@ -39,6 +39,13 @@ def hybrid_rank(
 
 def weight_grid() -> list[dict[str, float]]:
     return [
+        # The H&M catalog has rich descriptive metadata and purchase-only
+        # interactions, so validation must be able to favor content matching.
+        {"item_item": 0.20, "als": 0.10, "content": 0.60, "popularity": 0.10},
+        {"item_item": 0.10, "als": 0.10, "content": 0.70, "popularity": 0.10},
+        {"item_item": 0.10, "als": 0.00, "content": 0.80, "popularity": 0.10},
+        {"item_item": 0.00, "als": 0.00, "content": 0.90, "popularity": 0.10},
+        {"item_item": 0.25, "als": 0.15, "content": 0.50, "popularity": 0.10},
         {"item_item": 0.50, "als": 0.10, "content": 0.20, "popularity": 0.20},
         {"item_item": 0.40, "als": 0.20, "content": 0.20, "popularity": 0.20},
         {"item_item": 0.35, "als": 0.25, "content": 0.20, "popularity": 0.20},
