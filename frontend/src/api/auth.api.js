@@ -5,5 +5,6 @@ export const authApi = {
   verifyOtp: (otp) => client.post('/users/auth/verify-otp', { otp }).then((r) => r.data),
   login: (email, password, captchaToken) => client.post('/users/auth/login', { email, password, captchaToken }).then((r) => r.data),
   googleAuth: (idToken) => client.post('/users/auth/google-auth', { idToken }).then((r) => r.data),
+  logout: () => client.post('/users/auth/logout').then((r) => r.data),
   getProfile: () => client.get('/users/user/profile').then((r) => r.data),
 };

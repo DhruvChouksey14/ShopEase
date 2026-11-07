@@ -6,5 +6,5 @@ export const aiApi = {
   popular: () => client.get('/ai/recommendations/popular').then((r) => r.data.data.products || []),
   user: () => client.get('/ai/recommendations/user', { params: { sessionId } }).then((r) => r.data.data.products || []),
   cart: (productIds) => client.get('/ai/recommendations/cart', { params: { productIds: productIds.join(',') } }).then((r) => r.data.data.products || []),
-  trackEvent: (event) => client.post('/ai/events', { events: [event] }).catch(() => undefined),
+  trackEvent: (event) => client.post('/ai/events', { events: [{ ...event, sessionId: event.sessionId || sessionId }] }).catch(() => undefined),
 };
