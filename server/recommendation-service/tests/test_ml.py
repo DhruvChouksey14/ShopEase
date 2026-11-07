@@ -169,12 +169,12 @@ def test_main_forwards_hybrid_options_and_live_rows(monkeypatch, tmp_path, capsy
 
     monkeypatch.setattr(train_module, "train", fake_train)
     monkeypatch.setattr(sys, "argv", [
-        "train", "--data-source", "hybrid", "--dataset-name", "Retailrocket",
+        "train", "--data-source", "hybrid", "--dataset-name", "H&M",
         "--database-url", "postgresql://test", "--data-dir", str(tmp_path),
     ])
     train_module.main()
     assert captured == {
-        "dataset_name": "Retailrocket",
+        "dataset_name": "H&M",
         "data_source": "hybrid",
         "database_url": "postgresql://test",
     }
