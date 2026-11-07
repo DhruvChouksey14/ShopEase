@@ -52,7 +52,7 @@ def merge_interactions(dataset: pd.DataFrame, live: pd.DataFrame, source: str, h
     return pd.concat([dataset[["user_id", "product_id", "weight", "ts"]], live[["user_id", "product_id", "weight", "ts"]]], ignore_index=True)
 
 
-def train(data_dir: Path, model_dir: Path, category: str = "Retailrocket", dataset_name: str = "Retailrocket", data_source: str = "dataset", database_url: str | None = None) -> Path:
+def train(data_dir: Path, model_dir: Path, category: str = "H&M", dataset_name: str = "H&M", data_source: str = "dataset", database_url: str | None = None) -> Path:
     required = [data_dir / "interactions.parquet", data_dir / "items.parquet"]
     missing = [str(path) for path in required if not path.exists()]
     if missing:
@@ -62,9 +62,9 @@ def train(data_dir: Path, model_dir: Path, category: str = "Retailrocket", datas
         products = pd.read_parquet(products_path)
     else:
         products = pd.read_parquet(data_dir / "items.parquet").rename(columns={"item_id": "product_id"})
-        products["name"] = "Retailrocket product " + products["product_id"].astype(str)
+        products["name"] = "H&M fashion item " + products["product_id"].astype(str)
         products["description"] = products["tokens"].fillna("")
-        products["brand"] = "Retailrocket Dataset"
+        products["brand"] = "H&M"
         products["category"] = products["category_path"].fillna("uncategorized")
     dataset_interactions = pd.read_parquet(data_dir / "interactions.parquet")
     live = load_live_interactions(database_url) if data_source in {"live", "hybrid"} and database_url else pd.DataFrame()
@@ -85,8 +85,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", type=Path, default=Path(os.getenv("DATA_DIR", "data/processed")))
     parser.add_argument("--model-dir", type=Path, default=Path("/models"))
-    parser.add_argument("--category", default="Retailrocket")
-    parser.add_argument("--dataset-name", default=os.getenv("DATASET_NAME", "Retailrocket"))
+    parser.add_argument("--category", default="H&M")
+    parser.add_argument("--dataset-name", default=os.getenv("DATASET_NAME", "H&M"))
     parser.add_argument("--data-source", default=os.getenv("DATA_SOURCE", "dataset"), choices=("dataset", "live", "hybrid"))
     parser.add_argument("--database-url", default=os.getenv("DATABASE_URL"))
     args = parser.parse_args()

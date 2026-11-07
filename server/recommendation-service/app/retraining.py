@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
-from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -21,7 +20,20 @@ class RetrainingScheduler:
 
     async def train(self) -> None:
         async with self.lock:
-            process = await asyncio.create_subprocess_exec(sys.executable, "-m", "app.ml.train", "--data-dir", self.settings.data_dir, "--model-dir", self.settings.model_dir)
+            command = [
+                sys.executable,
+                "-m",
+                "app.ml.train",
+                "--data-dir",
+                self.settings.data_dir,
+                "--model-dir",
+                self.settings.model_dir,
+                "--data-source",
+                self.settings.data_source,
+            ]
+            if self.settings.database_url:
+                command.extend(["--database-url", self.settings.database_url])
+            process = await asyncio.create_subprocess_exec(*command)
             result = await process.wait()
             if result:
                 LOGGER.error("Recommendation retraining failed with exit code %s", result)
