@@ -21,6 +21,6 @@ scrape_configs:
   - job_name: 'cart-service'
     static_configs: [{ targets: ['host.docker.internal:4008'] }]
   - job_name: 'worker-service'
-    static_configs: [{ targets: ['host.docker.internal:4009'] }]
+    static_configs: [{ targets: ['host.docker.internal:4011'] }]
   - job_name: 'recommendation-service'
     static_configs: [{ targets: ['recommendation-service:4010'] }]

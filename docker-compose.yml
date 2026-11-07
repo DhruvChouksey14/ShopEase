@@ -11,7 +11,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: postgres
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -167,7 +167,7 @@ services:
       - kafka
       - postgres
     volumes:
-      - recommendation_models:/models
+      - ./server/recommendation-service/models:/models:ro
       - ./data:/data:ro
     networks:
       - shopease-network
@@ -241,7 +241,6 @@ volumes:
   rabbitmq_data:
   prometheus_data:
   grafana_data:
-  recommendation_models:
 
 networks:
   shopease-network:
