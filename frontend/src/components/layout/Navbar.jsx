@@ -4,7 +4,7 @@ import { useAuthStore } from '../../store/auth.store';
 import { useCartStore } from '../../store/cart.store';
 
 export default function Navbar() {
-  const { user, isAuthenticated, logout } = useAuthStore();
+  const { user, isAuthenticated, signOut } = useAuthStore();
   const { items, fetchCart } = useCartStore();
   const navigate = useNavigate();
 
@@ -12,8 +12,8 @@ export default function Navbar() {
     if (isAuthenticated) fetchCart();
   }, [isAuthenticated, fetchCart]);
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await signOut();
     navigate('/login');
   };
 

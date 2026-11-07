@@ -23,6 +23,11 @@ export const useAuthStore = create((set, get) => ({
   logout: () => {
     set({ user: null, isAuthenticated: false, isLoading: false });
   },
+
+  signOut: async () => {
+    try { await authApi.logout(); } catch { /* still clear local state */ }
+    set({ user: null, isAuthenticated: false, isLoading: false });
+  },
 }));
 
 // Listen for forced logout from API interceptor
