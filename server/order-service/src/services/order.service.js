@@ -160,17 +160,6 @@ const createOrder = async (userId, shippingAddress, idempotencyKey) => {
           await notifyStatus(order, 'PAYMENT_PENDING');
 
           order = await prisma.order.findUnique({ where: { id: order.id }, include: { items: true } });
-
-          // Cart is only cleared once checkout has successfully reached PAYMENT_PENDING —
-          // if the saga fails before this point the user still has their cart to retry with.
-          await cartClient.clearCart(userId).catch((err) =>
-               console.warn('Failed to clear cart after checkout', { userId, error: err.message })
-          );
-
-          const response = await buildOrderResponse(order);
-
-          await saveIdempotency(orderKey, response);
-          return response;
      } catch (error) {
           console.error(`Order creation failed for user ${userId}`, { error: error.message });
 
@@ -197,6 +186,21 @@ const createOrder = async (userId, shippingAddress, idempotencyKey) => {
           }
           throw error;
      }
+
+     const response = await buildOrderResponse(order);
+
+     try {
+          await saveIdempotency(orderKey, response);
+     } catch (err) {
+          if (err.code !== 'P2002') console.warn('Failed to save idempotency record', { orderKey, error: err.message });
+     }
+
+     // Clear the cart last, only after the response is built. Best-effort.
+     await cartClient.clearCart(userId).catch((err) =>
+          console.warn('Failed to clear cart after checkout', { userId, error: err.message })
+     );
+
+     return response;
 };
 
 // ─── Handle Payment Success (Kafka consumer) ─────────────────────────────────
