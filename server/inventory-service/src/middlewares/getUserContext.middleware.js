@@ -1,14 +1,23 @@
-const { UnauthorizedError } = require('../utils/error');
+const { UnauthorizedError, ForbiddenError } = require('../utils/error');
 
 function getUserContext(req, res, next) {
      const userId = req.headers['x-user-id'];
+     const role = req.headers['x-user-role'];
 
-     if (!userId) {
+     if (!userId || !role) {
           return next(new UnauthorizedError('User context missing - must come through gateway'));
      }
 
-     req.user = { id: userId };
+     req.user = { id: userId, role };
      next();
 }
 
-module.exports = { getUserContext };
+function requireAdmin(req, res, next) {
+     if (req.user?.role !== 'ADMIN') {
+          return next(new ForbiddenError('Administrator access is required', 'ADMIN_REQUIRED'));
+     }
+
+     next();
+}
+
+module.exports = { getUserContext, requireAdmin };
