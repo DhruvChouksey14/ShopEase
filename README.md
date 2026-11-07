@@ -418,7 +418,7 @@ The optional `recommendation-service` (FastAPI, port `4010`) provides personaliz
 
 ### Data and license
 
-Training uses the [Retailrocket e-commerce dataset](https://www.kaggle.com/datasets/retailrocket/ecommerce-dataset), supplied manually. Do not download it from the application. Place `events.csv`, `item_properties_part1.csv`, `item_properties_part2.csv`, and `category_tree.csv` in `data/raw/retailrocket/`. The importer writes `events.parquet`, `interactions.parquet`, and `items.parquet` to `data/processed/`. Retailrocket has no names, prices, or images; catalog loading generates deterministic synthetic placeholders and prints a warning. Use the dataset only under its upstream non-commercial/personal-use terms.
+Training uses the [H&M Personalized Fashion Recommendations dataset](https://www.kaggle.com/competitions/h-and-m-personalized-fashion-recommendations/data), supplied manually under Kaggle's competition rules. Do not download it from the application. Put `articles.csv` and `transactions_train.csv` in `data/H&M/`; `customers.csv` is optional and the `images/` folder is not required. The importer writes `events.parquet`, `interactions.parquet`, `items.parquet`, and `products.parquet` to `data/processed/`. Product names, descriptions, categories, and article attributes come from H&M metadata. To use the optional image archive, set `HM_IMAGE_BASE_URL` to the URL serving the dataset's `images/` directory; the importer emits URLs only for files that exist. Without images, the storefront uses its existing no-image fallback. H&M's transaction prices are normalized; the loader scales them to approximate rupee display values for this demo. The catalog loader deactivates old `rr-` placeholder products before inserting H&M products.
 
 ### ML run order
 
@@ -427,30 +427,21 @@ cd server/recommendation-service
 uv venv --python python3.13 .venv
 uv pip install --python .venv/bin/python -r requirements.txt
 cd ../..
-python3 scripts/import_dataset.py --input-dir data/raw/retailrocket
+python3 scripts/import_dataset.py --input-dir 'data/H&M'
 python3 scripts/load_catalog.py --admin-user-id <ADMIN_USER_ID>
 cd server/recommendation-service
-.venv/bin/python -m app.ml.train --data-dir ../../data/processed --model-dir ./models
+.venv/bin/python -m app.ml.train --data-dir ../../data/processed --model-dir ./models --category 'H&M' --dataset-name 'H&M'
 .venv/bin/python -m app.ml.evaluate --interactions ../../data/processed/interactions.parquet
 docker compose up --build recommendation-service ai-service api-gateway
 ```
 
-Use `--min-interactions`, `--max-items`, `--max-events`, and `--max-events-per-visitor` to control filtering. `scripts/make_demo_user.py --shop-user-id <SHOP_USER_ID>` maps a real demo account to an active visitor with 20-100 events across categories. Do not generate synthetic users. Set `DATA_SOURCE=dataset`, `live`, or `hybrid`; hybrid training gives live events the higher recency weight. Set `RECOMMENDATION_SERVICE_URL` to an unavailable endpoint or omit the recommendation container to switch ML off; the Node fallback remains active.
+Use `--min-interactions`, `--max-items`, `--max-events`, and `--max-events-per-customer` to control filtering. `scripts/make_demo_user.py --shop-user-id <SHOP_USER_ID>` maps a demo account to an H&M customer with 20-100 purchases across categories. Dataset customer IDs are anonymized and must not be treated as real ShopEase accounts. Set `DATA_SOURCE=dataset`, `live`, or `hybrid`; hybrid training gives live events the higher recency weight. Set `RECOMMENDATION_SERVICE_URL` to an unavailable endpoint or omit the recommendation container to switch ML off; the Node fallback remains active.
 
 The gateway accepts `POST /api/ai/events` with at most 20 strict events. Event identity comes from the trusted `x-user-id` gateway header; anonymous sessions use `sessionId`. The recommendation service stores these events in its own `recommendation_interactions` table and also consumes `order.confirmed`. Internal service endpoints require `INTERNAL_SERVICE_KEY`; clients never supply a user ID in a request body to personalize results.
 
 ### Recommendation results
 
-The recorded Retailrocket offline evaluation uses a chronological split: the first 80% of timestamps trains the models, the next time window tunes hybrid weights, and the final held-out window is used for reported metrics and promotion decisions. Hybrid weights are selected only on validation data. Regenerate the report with the ML run order above when the dataset or training code changes.
-
-| Model | Precision@10 | Recall@10 | NDCG@10 | MAP@10 | Coverage |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Time-decayed popularity | 0.0088 | 0.0675 | 0.0407 | 0.0306 | 0.0026 |
-| All-time popularity | 0.0068 | 0.0588 | 0.0371 | 0.0288 | 0.0026 |
-| Item-item cosine | 0.0209 | 0.1686 | 0.1231 | 0.1068 | 0.1456 |
-| ALS | 0.0081 | 0.0715 | 0.0471 | 0.0378 | 0.0426 |
-| Content | 0.0223 | 0.1855 | 0.1052 | 0.0764 | 0.2172 |
-| Hybrid | 0.0209 | 0.1683 | 0.1211 | 0.1029 | 0.1520 |
+Offline evaluation uses a chronological split of H&M purchases. The training window fits the models, the validation window tunes hybrid weights, and the final held-out window reports metrics and informs promotion decisions. Hybrid weights are selected only on validation data. Generate a fresh report with the ML run order above after importing the H&M dataset; previous dataset metrics are not carried forward.
 
 ```mermaid
 flowchart LR
