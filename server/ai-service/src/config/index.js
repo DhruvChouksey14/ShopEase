@@ -12,6 +12,7 @@ const config = {
      LLM_API_KEY: process.env.GROQ_API_KEY || '',
      LLM_MODEL: process.env.LLM_MODEL || 'openai/gpt-oss-20b',
      LLM_TIMEOUT_MS: Number(process.env.LLM_TIMEOUT_MS || 20000),
+     RECOMMENDATION_TIMEOUT_MS: Number(process.env.RECOMMENDATION_TIMEOUT_MS || 2000),
      INTERNAL_AUTH_ENABLED: process.env.INTERNAL_AUTH_ENABLED !== 'false',
 };
 module.exports = { config };
