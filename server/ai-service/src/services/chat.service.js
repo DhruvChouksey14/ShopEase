@@ -40,8 +40,20 @@ async function chatInternal(userId, rawMessage, llm = complete) {
      if (!message || message.length > 1000) throw new Error('Message must contain 1 to 1000 characters');
      const deadline = Date.now() + 25000;
      const key = historyKey(userId);
-     const state = JSON.parse((await redis.get(key)) || '{"messages":[],"products":[]}');
+     let state = { messages: [], products: [] };
+     try {
+          const parsed = JSON.parse((await redis.get(key)) || '{}');
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+               state = parsed;
+          }
+     } catch (_) {
+          await redis.del?.(key);
+     }
      if (checkoutIntent.test(message)) {
+          const cart = await withDeadline(tools.getCart(userId), deadline);
+          if (!cart?.items?.length) {
+               return { reply: 'Your cart is empty. Add a product before checkout.', actions: [], products: [] };
+          }
           return { reply: 'I can take you to checkout when your cart has items.', actions: [{ type: 'go_to_checkout' }], products: [] };
      }
      const messages = [...(Array.isArray(state.messages) ? state.messages.slice(-20) : [])];

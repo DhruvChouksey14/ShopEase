@@ -84,6 +84,10 @@ async function addProductToCart(raw, userId, allowedIds) {
      await request('cart', '/items', { method: 'POST', body: { productId: args.productId, quantity: args.quantity }, userId });
      return { added: true, productId: args.productId, quantity: args.quantity };
 }
+async function getCart(userId) {
+     if (!userId) throw new Error('Sign in before checking out');
+     return request('cart', '/', { userId });
+}
 async function recommendationProducts(productId, type) {
      const cacheKey = `ai:recommendation:${type}:${productId}`;
      const cached = await redis.get(cacheKey);
@@ -138,4 +142,4 @@ async function popularProducts() {
      try { await redis.set('ai:recommendation:popular', JSON.stringify(cards), 'EX', 180); } catch (_) { }
      return cards;
 }
-module.exports = { cleanText, validateSearchArgs, validateAddArgs, normalizeProduct, searchProducts, addProductToCart, recommendationProducts, popularProducts, hydrateIds };
+module.exports = { cleanText, validateSearchArgs, validateAddArgs, normalizeProduct, searchProducts, addProductToCart, getCart, recommendationProducts, popularProducts, hydrateIds };

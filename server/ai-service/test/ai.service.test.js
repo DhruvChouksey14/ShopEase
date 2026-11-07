@@ -3,12 +3,13 @@ const path = require('node:path');
 
 jest.mock('../src/config/redis', () => ({ redis: {
   get: jest.fn(async () => null), set: jest.fn(async () => 'OK'),
-  zrevrange: jest.fn(async () => []), eval: jest.fn(async () => 1),
+  del: jest.fn(async () => 1), zrevrange: jest.fn(async () => []), eval: jest.fn(async () => 1),
 } }));
 jest.mock('../src/services/http', () => ({ request: jest.fn() }));
 
 const { chat } = require('../src/services/chat.service');
 const { validateSearchArgs, validateAddArgs, searchProducts, addProductToCart, popularProducts } = require('../src/services/tools');
+const tools = require('../src/services/tools');
 const { redis } = require('../src/config/redis');
 const http = require('../src/services/http');
 
@@ -66,6 +67,22 @@ test('chat returns a fallback when the overall deadline is exceeded', async () =
     reply: 'Sorry, I could not complete that request in time.', products: [], actions: [],
   });
   jest.useRealTimers();
+});
+
+test('chat does not offer checkout when the cart is empty', async () => {
+  tools.getCart = jest.fn(async () => ({ items: [] }));
+  await expect(chat('u1', 'take me to checkout', jest.fn())).resolves.toEqual({
+    reply: 'Your cart is empty. Add a product before checkout.', products: [], actions: [],
+  });
+});
+
+test('chat recovers from malformed saved history', async () => {
+  redis.get.mockResolvedValueOnce('{not-json');
+  const llm = jest.fn(async (_messages, options) => options?.tools === false ? { content: 'Recovered.' } : { content: 'Recovered.' });
+  await expect(chat('u1', 'hello', llm)).resolves.toEqual({
+    reply: 'Recovered.', products: [], actions: [],
+  });
+  expect(redis.del).toHaveBeenCalledWith('ai:chat:u1');
 });
 
 test('popular recommendations use search fallback when event rankings are empty', async () => {
