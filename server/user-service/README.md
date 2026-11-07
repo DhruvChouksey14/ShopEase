@@ -550,16 +550,19 @@ How it works:
 Purpose:
 - update the profile
 
-Current status:
-- this route is defined but the actual controller logic is still a TODO.
+Request body:
+- accepts `firstName`, `lastName`, and/or `email`
+- rejects unknown fields and invalid or empty values
+- email is normalized to lowercase
 
 ### 11.3 DELETE /user/profile
 
 Purpose:
 - delete the profile
 
-Current status:
-- this route is also defined but still pending implementation.
+Behavior:
+- permanently deletes the authenticated user and linked authentication providers
+- clears the cached profile
 
 ### 11.4 GET /user/internal/:userId
 

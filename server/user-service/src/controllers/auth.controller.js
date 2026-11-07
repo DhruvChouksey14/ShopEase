@@ -25,6 +25,17 @@ const cookieOptions = (maxAge) => ({
      maxAge,
 });
 
+const normalizeEmail = (value) => {
+     if (typeof value !== 'string') {
+          throw new BadRequestError("Email must be a valid email address");
+     }
+     const email = value.trim().toLowerCase();
+     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          throw new BadRequestError("Email must be a valid email address");
+     }
+     return email;
+};
+
 exports.sendOTP = async (req, res) =>{
      const {firstName, lastName, email, password, confirmPassword} = req.body;
      if(!firstName || !lastName || !email || !password || !confirmPassword){
@@ -35,7 +46,7 @@ exports.sendOTP = async (req, res) =>{
           throw new BadRequestError("Password mismatch");
      }
 
-     const {otpSessionId} = await authService.sendOTP(firstName, lastName, email, password);
+     const {otpSessionId} = await authService.sendOTP(firstName, lastName, normalizeEmail(email), password);
      res.cookie("otp_session", otpSessionId, cookieOptions(config.OTP_TTL * 1000)).status(200).json({
           success: true,
           message: "OTP sent successfully"
@@ -66,7 +77,7 @@ exports.login = async (req, res) =>{
           throw new BadRequestError("Email and Password are required")
      }
      const deviceId = getDeviceFingerprint(req);
-     const {accessToken, refreshToken, loggedInUser} = await authService.login(email, password, deviceId, req.body.captchaToken);
+     const {accessToken, refreshToken, loggedInUser} = await authService.login(normalizeEmail(email), password, deviceId, req.body.captchaToken);
      res.cookie("accessToken", accessToken, cookieOptions(config.ACCESS_TOKEN_EXP_SEC * 1000));
      res.cookie("refreshToken", refreshToken, cookieOptions(config.REFRESH_TOKEN_EXP_SEC * 1000));
      res.status(200).json({
@@ -89,6 +100,14 @@ exports.rotateRefreshToken = async (req, res) =>{
           success: true,
           message: "Access and Refresh token reissued"
      });
+};
+
+exports.logout = async (req, res) => {
+     await authService.logout(req.user.id, getDeviceFingerprint(req));
+     const { maxAge, ...clearOptions } = cookieOptions(0);
+     res.clearCookie('accessToken', clearOptions);
+     res.clearCookie('refreshToken', clearOptions);
+     return res.status(200).json({ success: true, message: 'Logged out successfully' });
 };
 
 

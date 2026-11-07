@@ -89,6 +89,7 @@ const verifyRefreshToken = (refreshToken) => {
 };
 
 const sendOTP = async(firstName, lastName, email, password) =>{
+     email = email.trim().toLowerCase();
      const existingUser = await prisma.user.findUnique({
           where: {email}
      })
@@ -121,9 +122,14 @@ const verifyOTP = async(otp, otpSessionId) =>{
 
      await notificationProducer.sendWelcomeEmail(meta.email, meta.firstName);
      console.log(`Welcome email queued for ${meta.email}`);
-     return user;
+     const { password: _password, ...safeUser } = user;
+     return safeUser;
      
 }
+
+const logout = async (userId, deviceId) => {
+     await redis.del(`refresh:${userId}:${deviceId}`);
+};
 
 const login = async(email, password, deviceId, captchaToken) =>{
      const existingUser = await prisma.user.findUnique({
@@ -266,4 +272,4 @@ const verifyGoogleIdToken = async(idToken, deviceId) =>{
      return {accessToken, refreshToken, loggedInUser: safeUser};
      
 }
-module.exports = {sendOTP, verifyOTP, login, rotateRefreshToken, verifyGoogleIdToken}
+module.exports = {sendOTP, verifyOTP, login, rotateRefreshToken, verifyGoogleIdToken, logout}
