@@ -2,6 +2,28 @@
 
 # ShopEase — Distributed E-Commerce Platform
 
+## One-command local setup
+
+Requirements: Docker Desktop or Docker Engine with Compose v2.
+
+```bash
+./scripts/start-local.sh
+```
+
+The script creates a local `.env` when needed, generates missing development secrets, builds the frontend and all services, creates the PostgreSQL databases, and starts the complete stack. Open [http://localhost:3000](http://localhost:3000). Stop it with:
+
+```bash
+./scripts/stop-local.sh
+```
+
+Optional local tools (pgAdmin, Kafka UI, Kibana, Prometheus, and Grafana) can be started with:
+
+```bash
+docker compose --profile tools up -d
+```
+
+The default startup intentionally excludes those tools to reduce download size and startup time. — Distributed E-Commerce Platform
+
 **A production-grade, event-driven microservices platform for online retail**
 
 Built with saga orchestration, distributed locking, idempotent writes, circuit breakers,

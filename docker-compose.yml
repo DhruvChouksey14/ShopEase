@@ -14,10 +14,12 @@ services:
       - "127.0.0.1:5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     networks:
       - shopease-network
 
   pgadmin:
+    profiles: ["tools"]
     image: dpage/pgadmin4
     container_name: pgadmin
     environment:
@@ -84,6 +86,7 @@ services:
       - shopease-network
 
   kafka-ui:
+    profiles: ["tools"]
     image: provectuslabs/kafka-ui:v0.7.2
     container_name: kafka-ui
     restart: always
@@ -127,10 +130,10 @@ services:
       INTERNAL_SERVICE_KEY: ${INTERNAL_SERVICE_KEY:?Set INTERNAL_SERVICE_KEY in .env}
       REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}@redis:6379
       KAFKA_BROKER: kafka:9092
-      SEARCH_SERVICE_URL: ${AI_SEARCH_SERVICE_URL:-http://host.docker.internal:4002}
-      CATALOG_SERVICE_URL: ${AI_CATALOG_SERVICE_URL:-http://host.docker.internal:4003}
-      INVENTORY_SERVICE_URL: ${AI_INVENTORY_SERVICE_URL:-http://host.docker.internal:4007}
-      CART_SERVICE_URL: ${AI_CART_SERVICE_URL:-http://host.docker.internal:4008}
+      SEARCH_SERVICE_URL: http://search-service:4002
+      CATALOG_SERVICE_URL: http://catalog-service:4003
+      INVENTORY_SERVICE_URL: http://inventory-service:4007
+      CART_SERVICE_URL: http://cart-service:4008
       RECOMMENDATION_SERVICE_URL: http://recommendation-service:4010
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-20b}
@@ -139,6 +142,10 @@ services:
     depends_on:
       - redis
       - kafka
+      - search-service
+      - catalog-service
+      - inventory-service
+      - cart-service
     networks:
       - shopease-network
 
@@ -172,6 +179,251 @@ services:
     networks:
       - shopease-network
 
+  user-service:
+    build:
+      context: .
+      dockerfile: server/user-service/Dockerfile
+    container_name: user-service
+    restart: unless-stopped
+    environment:
+      PORT: 4001
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-shopease}:${POSTGRES_PASSWORD}@postgres:5432/user_db?schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      KAFKA_BROKER: kafka:9092
+      KAFKA_CLIENT_ID: user-service
+      INTERNAL_SERVICE_KEY: ${INTERNAL_SERVICE_KEY:?Set INTERNAL_SERVICE_KEY in .env}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?Set JWT_ACCESS_SECRET in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET in .env}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-local-disabled}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-local-disabled}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-local-disabled}
+      MAIL_SEND: ${MAIL_SEND:-local@example.test}
+      ALLOWED_ORIGINS: http://localhost:3000
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+    networks:
+      - shopease-network
+
+  search-service:
+    build:
+      context: .
+      dockerfile: server/search-service/Dockerfile
+    container_name: search-service
+    restart: unless-stopped
+    environment:
+      PORT: 4002
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      KAFKA_BROKER: kafka:9092
+      KAFKA_CLIENT_ID: search-service
+      ALLOWED_ORIGINS: http://localhost:3000
+    depends_on:
+      - elasticsearch
+      - kafka
+    networks:
+      - shopease-network
+
+  catalog-service:
+    build:
+      context: .
+      dockerfile: server/catalog-service/Dockerfile
+    container_name: catalog-service
+    restart: unless-stopped
+    environment:
+      PORT: 4003
+      DATABASE_URL: postgresql://${POSTGRES_USER:-shopease}:${POSTGRES_PASSWORD}@postgres:5432/catalog_db?schema=public
+      KAFKA_BROKER: kafka:9092
+      KAFKA_CLIENT_ID: catalog-service
+      INTERNAL_SERVICE_KEY: ${INTERNAL_SERVICE_KEY:?Set INTERNAL_SERVICE_KEY in .env}
+      ALLOWED_ORIGINS: http://localhost:3000
+    depends_on:
+      - postgres
+      - kafka
+    networks:
+      - shopease-network
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: server/notification-service/Dockerfile
+    container_name: notification-service
+    restart: unless-stopped
+    environment:
+      PORT: 4004
+      KAFKA_BROKER: kafka:9092
+      KAFKA_CLIENT_ID: notification-service
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-local-disabled}
+      MAIL_SEND: ${MAIL_SEND:-local@example.test}
+      FRONTEND_URL: http://localhost:3000
+    depends_on:
+      - kafka
+    networks:
+      - shopease-network
+
+  order-service:
+    build:
+      context: .
+      dockerfile: server/order-service/Dockerfile
+    container_name: order-service
+    restart: unless-stopped
+    environment:
+      PORT: 4005
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-shopease}:${POSTGRES_PASSWORD}@postgres:5432/order_db?schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      KAFKA_BROKER: kafka:9092
+      KAFKA_CLIENT_ID: order-service
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-shopease}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672
+      INTERNAL_SERVICE_KEY: ${INTERNAL_SERVICE_KEY:?Set INTERNAL_SERVICE_KEY in .env}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?Set JWT_ACCESS_SECRET in .env}
+      INVENTORY_SERVICE_URL: http://inventory-service:4007
+      PAYMENT_SERVICE_URL: http://payment-service:4006
+      USER_SERVICE_URL: http://user-service:4001
+      CATALOG_SERVICE_URL: http://catalog-service:4003
+      CART_SERVICE_URL: http://cart-service:4008
+      ALLOWED_ORIGINS: http://localhost:3000
+    ports:
+      - "127.0.0.1:4005:4005"
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+      - rabbitmq
+    networks:
+      - shopease-network
+
+  payment-service:
+    build:
+      context: .
+      dockerfile: server/payment-service/Dockerfile
+    container_name: payment-service
+    restart: unless-stopped
+    environment:
+      PORT: 4006
+      DATABASE_URL: postgresql://${POSTGRES_USER:-shopease}:${POSTGRES_PASSWORD}@postgres:5432/payment_db?schema=public
+      KAFKA_BROKER: kafka:9092
+      KAFKA_CLIENT_ID: payment-service
+      INTERNAL_SERVICE_KEY: ${INTERNAL_SERVICE_KEY:?Set INTERNAL_SERVICE_KEY in .env}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-local-disabled}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-local-disabled}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-local-disabled}
+      ALLOWED_ORIGINS: http://localhost:3000
+    depends_on:
+      - postgres
+      - kafka
+    networks:
+      - shopease-network
+
+  inventory-service:
+    build:
+      context: .
+      dockerfile: server/inventory-service/Dockerfile
+    container_name: inventory-service
+    restart: unless-stopped
+    environment:
+      PORT: 4007
+      DATABASE_URL: postgresql://${POSTGRES_USER:-shopease}:${POSTGRES_PASSWORD}@postgres:5432/inventory_db?schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      KAFKA_BROKER: kafka:9092
+      KAFKA_CLIENT_ID: inventory-service
+      INTERNAL_SERVICE_KEY: ${INTERNAL_SERVICE_KEY:?Set INTERNAL_SERVICE_KEY in .env}
+      ALLOWED_ORIGINS: http://localhost:3000
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+    networks:
+      - shopease-network
+
+  cart-service:
+    build:
+      context: .
+      dockerfile: server/cart-service/Dockerfile
+    container_name: cart-service
+    restart: unless-stopped
+    environment:
+      PORT: 4008
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      CATALOG_SERVICE_URL: http://catalog-service:4003
+      INTERNAL_SERVICE_KEY: ${INTERNAL_SERVICE_KEY:?Set INTERNAL_SERVICE_KEY in .env}
+      ALLOWED_ORIGINS: http://localhost:3000
+    depends_on:
+      - redis
+      - catalog-service
+    networks:
+      - shopease-network
+
+  worker-service:
+    build:
+      context: .
+      dockerfile: server/worker-service/Dockerfile
+    container_name: worker-service
+    restart: unless-stopped
+    environment:
+      PORT: 4011
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-shopease}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672
+      USER_SERVICE_URL: http://user-service:4001
+      INTERNAL_SERVICE_KEY: ${INTERNAL_SERVICE_KEY:?Set INTERNAL_SERVICE_KEY in .env}
+    depends_on:
+      - rabbitmq
+      - user-service
+    networks:
+      - shopease-network
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: server/api-gateway/Dockerfile
+    container_name: api-gateway
+    restart: unless-stopped
+    environment:
+      PORT: 4000
+      NODE_ENV: ${NODE_ENV:-development}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      ALLOWED_ORIGINS: http://localhost:3000
+      INTERNAL_SERVICE_KEY: ${INTERNAL_SERVICE_KEY:?Set INTERNAL_SERVICE_KEY in .env}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?Set JWT_ACCESS_SECRET in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET in .env}
+      USER_SERVICE_URL: http://user-service:4001
+      SEARCH_SERVICE_URL: http://search-service:4002
+      CATALOG_SERVICE_URL: http://catalog-service:4003
+      NOTIFICATION_SERVICE_URL: http://notification-service:4004
+      ORDER_SERVICE_URL: http://order-service:4005
+      PAYMENT_SERVICE_URL: http://payment-service:4006
+      INVENTORY_SERVICE_URL: http://inventory-service:4007
+      CART_SERVICE_URL: http://cart-service:4008
+      AI_SERVICE_URL: http://ai-service:4009
+    ports:
+      - "127.0.0.1:4000:4000"
+    depends_on:
+      - redis
+      - user-service
+      - search-service
+      - catalog-service
+      - order-service
+      - payment-service
+      - inventory-service
+      - cart-service
+      - ai-service
+    networks:
+      - shopease-network
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:8080"
+    depends_on:
+      - api-gateway
+      - order-service
+    networks:
+      - shopease-network
+
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
     container_name: elasticsearch
@@ -188,6 +440,7 @@ services:
       - shopease-network
 
   kibana:
+    profiles: ["tools"]
     image: docker.elastic.co/kibana/kibana:8.12.0
     container_name: kibana
     restart: always
@@ -202,6 +455,7 @@ services:
 
   # ─── Observability ────────────────────────────────────────────────────────
   prometheus:
+    profiles: ["tools"]
     image: prom/prometheus:v2.55.1
     container_name: prometheus
     restart: always
@@ -216,6 +470,7 @@ services:
       - shopease-network
 
   grafana:
+    profiles: ["tools"]
     image: grafana/grafana:11.4.0
     container_name: grafana
     restart: always

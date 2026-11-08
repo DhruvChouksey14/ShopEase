@@ -2,7 +2,7 @@ FROM node:22.14.0-alpine3.21 AS deps
 WORKDIR /app
 COPY server/inventory-service/package*.json ./
 COPY server/inventory-service/prisma ./prisma
-RUN npm ci --omit=dev
+RUN npm ci
 
 FROM node:22.14.0-alpine3.21 AS runtime
 ENV NODE_ENV=production
@@ -13,4 +13,4 @@ COPY --chown=node:node server/inventory-service/ ./
 COPY --chown=node:node shared/ /shared/
 USER node
 EXPOSE 3000
-CMD ["npm", "start"]
+CMD ["sh", "-c", "npx prisma db push --skip-generate && npm start"]

@@ -24,7 +24,7 @@ export default function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
         <div className="flex items-center justify-between h-16">
           <Link to="/" className="flex items-center gap-2 font-bold text-lg tracking-tight">
-            <span className="rounded-md bg-indigo-600 px-2 py-1 text-xs font-black text-white">SE</span>
+            <img src="/favicon.svg" alt="ShopEase" className="h-8 w-8 rounded-md" />
             <span>ShopEase</span>
           </Link>
 
